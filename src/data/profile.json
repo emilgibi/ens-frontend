@@ -1,0 +1,146 @@
+{
+    "profile": {
+        "employee": "3096 employees",
+        "name": "HONEYWELL AUTOMATION INDIA LIMITED",
+        "location": "PUNE, India",
+        "address": "56-57, HADAPSAR INDUSTRIAL ESTATE, HADAPSAR, 411013, PUNE, India",
+        "website": "www.honeywell.com",
+        "active_status": "Active",
+        "operation_type": "Publicly quoted",
+        "legal_status": "Public limited companies",
+        "national_identifier": "VAT/Tax number: 27AAACT3904F1ZM",
+        "alias": "HAIL",
+        "incorporation_date": "13/01/1984",
+        "revenue": "488M (USD - 2024-03-31)",
+        "subsidiaries": "2 entities",
+        "corporate_group": "1203 entities",
+        "shareholders": "HAIL MAURITIUS LIMITED (75.00%)\n\nHONEYWELL INTERNATIONAL INC\n\nNIPPON INDIA FOCUSED EQUITY FUND (2.69%)\n\nSBI MAGNUM MIDCAP FUND (2.33%)\n\nADITYA BIRLA SUN LIFE ELSS TAX SAVER (1.83%)\n\nLIFE INSURANCE CORP. OF INDIA (1.03%)\n\nTHE VANGUARD GROUP, INC.\n\n& 12 more shareholders",
+        "key_executives": "Mr Vimal P Kapur\nDr. Ganesh Ganapati Natarajan\nMr Ashish Madhukar Gaikwad\nMr Pedro Thena Garrote\nMr Anant Maheshwari\nMr Thaj Mathew\nMr Ashish Kumar Modi\n\n& 39 more key executives"
+    },
+    "ratings": {
+        "supplier": "High",
+        "additional_indicator": "Medium",
+        "bribery_corruption_overall": "No Alerts",
+        "cyber": "Medium",
+        "esg": "Medium",
+        "financials": "Medium",
+        "government_political": "High",
+        "other_adverse_media": "High",
+        "sanctions": "High",
+        "web": "No Alerts"
+    },
+    "findings": {
+        "sanctions": [
+            {
+                "kpi_area": "SAN",
+                "kpi_code": "SAN1A",
+                "kpi_definition": "Sanctions for Direct Affiliations - Organisation Level",
+                "kpi_rating": "Medium",
+                "kpi_flag": true,
+                "kpi_details": "Following sanctions imposed :\n\n1. As of [2017-01-01 00:00:00]:  Honeywell Automation India Limited Iran Connect - Associated with, Seen with: \n Honeywell Automation India Limited is an associate of Honeywell International Inc. In 2017 the U.S. state of Michigan listed Honeywell on its Iran restricted companies list rendering Honeywell ineligible for investment and state contracting. In 2017 the U.S. state of [...]"
+            },
+            {
+                "kpi_area": "SAN",
+                "kpi_code": "SAN3A",
+                "kpi_definition": "Associated Corporate Group - Sanctions Exposure",
+                "kpi_rating": "High",
+                "kpi_flag": true,
+                "kpi_details": "Sanctions or watchlist exposure identified among following members of the corporate group:\nGlobal Ultimate Owner:\nHONEYWELL INTERNATIONAL INC\n \nShareholders:\nHONEYWELL INTERNATIONAL INC,\nTHE VANGUARD GROUP, INC.\n \nOther Ultimate Beneficiaries:\nHONEYWELL INTERNATIONAL INC"
+            }
+        ],
+        "government_political": [
+            {
+                "kpi_area": "PEP",
+                "kpi_code": "PEP1B",
+                "kpi_definition": "PeP for Direct Affiliations -  Person Level",
+                "kpi_rating": "High",
+                "kpi_flag": true,
+                "kpi_details": "Following PeP findings :\n\n1. Dr. Ganesh Ganapati Natarajan: Potential Political Exposure Findings\n2. Ms Neera Saggi: Potential Political Exposure Findings"
+            },
+            {
+                "kpi_area": "PEP",
+                "kpi_code": "PEP3A",
+                "kpi_definition": "Associated Corporate Group - PeP/SOE Exposure",
+                "kpi_rating": "High",
+                "kpi_flag": true,
+                "kpi_details": "PEP exposure identified among following members of the corporate group:\nShareholders:\nLIFE INSURANCE CORP. OF INDIA,\nGOVERNMENT OF INDIA"
+            }
+        ],
+        "bribery_corruption_overall": [],
+        "financials": [
+            {
+                "kpi_area": "BKR",
+                "kpi_code": "BKR4A",
+                "kpi_definition": "Quick Ratio",
+                "kpi_rating": "Medium",
+                "kpi_flag": true,
+                "kpi_details": "Quick Ratio: Medium (BBB)"
+            },
+            {
+                "kpi_area": "BKR",
+                "kpi_code": "BKR5A",
+                "kpi_definition": "Current Ratio",
+                "kpi_rating": "Low",
+                "kpi_flag": true,
+                "kpi_details": "Current Ratio: Low (3.722)"
+            }
+        ],
+        "other_adverse_media": [
+            {
+                "kpi_area": "AMR",
+                "kpi_code": "AMR2A",
+                "kpi_definition": "Associated Corporate Group - Media Exposure",
+                "kpi_rating": "High",
+                "kpi_flag": true,
+                "kpi_details": "Possible Negative Media exposure identified among following members of the corporate group:\nGlobal Ultimate Owner:\nHONEYWELL INTERNATIONAL INC\n \nShareholders:\nHONEYWELL INTERNATIONAL INC,\nTHE VANGUARD GROUP, INC.\n \nOther Ultimate Beneficiaries:\nHONEYWELL INTERNATIONAL INC"
+            },
+            {
+                "kpi_area": "NWS",
+                "kpi_code": "NWS1A",
+                "kpi_definition": "Adverse Media - Additional Screening",
+                "kpi_rating": "High",
+                "kpi_flag": true,
+                "kpi_details": "Following Additional Screening:\n1. Adverse Media finding: Honeywell Automation India Faces Challenges Amid Broader Market Downturn and Mixed Momentum - Honeywell Automation India has experienced a 3.02% decline amid a broader market downturn, outpacing its sector's decrease of 3.03%. Despite recent declines, the stock's longer-term performance has lagged behind the Sensex, with a 21.31% gain over the last five years, compared to Sensex's 152.13% rise, reflecting ongoing challenges in the electronics components industry.\n Source: https://www.marketsmojo.com/news/stocks-in-action/honeywell-automation-india-stock-declines-3-02-amid-broader-market-downturn-2202009 (Date: 2025-04-26 00:00:00)\n2. Adverse Media finding: Honeywell Automation India Faces Continued Stock Decline Amid Broader Market Challenges - Honeywell Automation India's stock has seen a significant decline due to broader market challenges. Despite outperforming its sector, the stock has been trading below key moving averages. The stock experienced a further 3.13% decline on April 7, 2025, marking a 4.42% total drop over two days.\n Source: https://www.marketsmojo.com/news/stocks-in-action/honeywell-automation-india-stock-declines-3-13-trading-above-52-week-low-1736332 (Date: 2025-04-07 00:00:00)\n3. Adverse Media finding: Honeywell Automation India Faces Declining Stock Amidst Sector Underperformance and Growth Challenges - Honeywell Automation India is facing a decrease in stock value, experiencing three days of consecutive decline and nearing a 52-week low. Despite its high return on equity, the company has underperformed in the sector and displayed negative long-term growth. However, it still accounts for 29.52% of the industry.\n Source: https://www.marketsmojo.com/news/stocks-in-action/honeywell-automation-india-hits-52-week-low-amid-broader-market-gains-1575230 (Date: 2025-03-24 00:00:00)\n4. Adverse Media finding: These 8 high-priced stocks have corrected 25-40% from highs - During a recent market downturn, Honeywell Automation India's stock saw a significant drop of 41% from its 52-week high of Rs 59,700 to Rs 35,112.\n Source: https://m.economictimes.com/markets/stocks/news/these-8-high-priced-stocks-have-corrected-25-40-from-highs/honeywell-automation-india-the-stock-has-fallen-by-41-from-rs-59700-52-week-high-to-rs-35112-/slideshow/118782082.cms (Date: 2025-03-07 00:00:00)\n5. Adverse Media finding: Mazagon Dock, Firstsource, BHEL, Honeywell, NHPC, Sobha, OIL: Target prices for 7 stocks - Honeywell Automation India's Q3 results were below Antique Stock Broking's expectations, notably impacted by lower-than-expected revenue booking and disappointment on profitability. Anticipating macroeconomic challenges and global growth risk, Antique trimmed its FY25-27 estimates for Honeywell by 3-19%. Despite these revisions, it maintained a 'Buy' rating for Honeywell, with a revised target price of Rs 44,062.\n Source: https://www.businesstoday.in/markets/stocks/story/mazagon-dock-firstsource-bhel-honeywell-nhpc-sobha-oil-target-prices-for-7-stocks-463997-2025-02-10 (Date: 2025-02-10 00:00:00)\n"
+            }
+        ],
+        "additional_indicator": [
+            {
+                "kpi_area": "CYB",
+                "kpi_code": "CYB1A",
+                "kpi_definition": "Cyber Risk Rating Score",
+                "kpi_rating": "Medium",
+                "kpi_flag": true,
+                "kpi_details": "Medium Cyber Risk Rating: 690"
+            },
+            {
+                "kpi_area": "CYB",
+                "kpi_code": "CYB1B",
+                "kpi_definition": "Implied Cyber Risk Rating Score",
+                "kpi_rating": "High",
+                "kpi_flag": true,
+                "kpi_details": "High Implied Cyber Risk"
+            },
+            {
+                "kpi_area": "CYB",
+                "kpi_code": "CYB2A",
+                "kpi_definition": "Overall Cyber Risk Rating",
+                "kpi_rating": "Medium",
+                "kpi_flag": true,
+                "kpi_details": "Final Cyber Risk Rating: Medium"
+            },
+            {
+                "kpi_area": "ESG",
+                "kpi_code": "ESG1A",
+                "kpi_definition": "ESG Overall Score",
+                "kpi_rating": "High",
+                "kpi_flag": true,
+                "kpi_details": "Weak Overall ESG Score: 26"
+            }
+        ]
+    },
+    "metadata": {
+        "ens_id": "3bc018b9-c95f-4547-8950-8afea222856b",
+        "latest_session_id": "bc71962e-eaaa-4cc2-b33a-f79efd8e4906",
+        "latest_screening_time": "2025-05-02T06:10:36.950861+00:00"
+    }
+}

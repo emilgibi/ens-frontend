@@ -1,0 +1,122 @@
+trigger:
+  branches:
+    include:
+      - develop
+        # Replace with your main branch name
+variables:
+- group: Analytics-coe-image-replacement
+- group: jfrog-motif-crdentials
+
+parameters:
+- name : artifactBuildId
+  displayName: Artifact Build Id
+  type: string
+  default: latest
+- name: Build
+  displayName: Build
+  type: boolean
+  default: true
+- name: Deploy
+  displayName: Deploy
+  type: boolean
+  default: false
+
+# define the VM image I want to use for my build
+pool:
+  name: 'VMSS_LIINUX_EYGS_01'
+
+stages:
+- ${{ if eq(parameters.Build, true) }}:
+    - stage: Build
+      displayName: Analytics-coe-ens-frontend - Build
+      jobs:
+      - job:
+        steps:    
+       
+        - task: Docker@2
+          displayName: 'Build API Image'
+          inputs:
+            containerRegistry: 'Ancoe-DOCKER-Dev'
+            repository: 'analyticscoe-docker-dev/analyticsensuiapp'
+            command: 'buildAndPush'
+            Dockerfile: 'Dockerfile'
+            tags: 'v$(Build.BuildNumber)'
+            addPipelineData: false
+            addBaseImageData: false
+
+        - task: PublishPipelineArtifact@1
+          displayName: 'Publish Artifact: Analyticscoe-Dev-ens-frontend'
+          inputs:
+            targetPath: '$(System.DefaultWorkingDirectory)'
+            artifact: 'Analyticscoe-Dev-ens-frontend'
+            publishLocation: 'pipeline'
+    
+- ${{ if eq(parameters.Deploy, true) }}:
+    - stage: Deploy
+      displayName: Deploy
+      jobs:
+        - deployment: Deploy
+          environment: Analyticscoe-Dev-ens-frontend
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - checkout: none
+                  - download: none      
+               
+                  - task: DownloadPipelineArtifact@2
+                    inputs:
+                      buildType: 'current'
+                      artifactName: 'Analyticscoe-Dev-ens-frontend'
+                      targetPath: '$(System.DefaultWorkingDirectory)'
+                  - task: qetza.replacetokens.replacetokens-task.replacetokens@5
+                    inputs:
+                      rootDirectory: '.'
+                      targetFiles: '$(System.DefaultWorkingDirectory)/KaaSOrchestration/Dev/UI/Deployment.yaml'
+                      encoding: 'auto'
+                      tokenPattern: 'default'
+                      writeBOM: true
+                      actionOnMissing: 'warn'
+                      keepToken: false
+                      actionOnNoFiles: 'continue'
+                      enableTransforms: false
+                      enableRecursion: false
+                      useLegacyPattern: false
+                      enableTelemetry: true
+
+                  - task: Kubernetes@1
+                    displayName: API contianer Deploy
+                    inputs:
+                      connectionType: 'Kubernetes Service Connection'
+                      kubernetesServiceEndpoint: 'acoe-dev-kube-st-connection'
+                      namespace: 'acoe-dev-env-apps'
+                      command: 'apply'
+                      useConfigurationFile: true
+                      configuration: '$(System.DefaultWorkingDirectory)/KaaSOrchestration/Dev/UI/service.yaml' 
+                  - task: Kubernetes@1
+                    displayName: API contianer Deploy
+                    inputs:
+                      connectionType: 'Kubernetes Service Connection'
+                      kubernetesServiceEndpoint: 'acoe-dev-kube-st-connection'
+                      namespace: 'acoe-dev-env-apps'
+                      command: 'apply'
+                      useConfigurationFile: true
+                      configuration: '$(System.DefaultWorkingDirectory)/KaaSOrchestration/Dev/UI/ingressancoe.yaml'
+                  - task: Kubernetes@1
+                    displayName: API contianer Deploy
+                    inputs:
+                      connectionType: 'Kubernetes Service Connection'
+                      kubernetesServiceEndpoint: 'acoe-dev-kube-st-connection'
+                      namespace: 'acoe-dev-env-apps'
+                      command: 'apply'
+                      useConfigurationFile: true
+                      configuration: '$(System.DefaultWorkingDirectory)/KaaSOrchestration/Dev/UI/ancoe-ens-configmap.yaml'       
+                  - task: Kubernetes@1
+                    displayName: API contianer Deploy
+                    inputs:
+                      connectionType: 'Kubernetes Service Connection'
+                      kubernetesServiceEndpoint: 'acoe-dev-kube-st-connection'
+                      namespace: 'acoe-dev-env-apps'
+                      command: 'apply'
+                      useConfigurationFile: true
+                      configuration: '$(System.DefaultWorkingDirectory)/KaaSOrchestration/Dev/UI/Deployment.yaml'    
