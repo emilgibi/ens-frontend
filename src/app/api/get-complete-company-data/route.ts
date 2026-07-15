@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { API_ENDPOINTS } from '@/constants/api-endpoints';
 import { cookies } from 'next/headers';
 
 /**
@@ -20,7 +19,8 @@ export async function POST(req: NextRequest) {
     const accessToken = cookieStore.get('probe42_access_token')?.value
       ?? req.headers.get('authorization')?.replace('Bearer ', '');
 
-    const orchUrl = API_ENDPOINTS.BACKEND.GET_COMPLETE_COMPANY_DATA;
+    const orchestrationBase = process.env.SERVER_APPLICATION_ORCHESTRATION || process.env.NEXT_PUBLIC_APPLICATION_ORCHESTRATION;
+    const orchUrl = `${orchestrationBase}/get-complete-company-data`;
 
     const orchRes = await fetch(orchUrl, {
       method: 'POST',

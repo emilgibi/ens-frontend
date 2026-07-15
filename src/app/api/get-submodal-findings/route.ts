@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { API_ENDPOINTS } from '@/constants/api-endpoints';
 import { cookies } from 'next/headers';
 
 export async function POST(req: NextRequest) {
@@ -9,7 +8,8 @@ export async function POST(req: NextRequest) {
     const token = cookieStore.get('probe42_access_token')?.value
       ?? req.headers.get('authorization')?.replace('Bearer ', '');
 
-    const res = await fetch(API_ENDPOINTS.BACKEND.UNIVERSE_SUBMODAL_FINDINGS, {
+    const backendBase = process.env.SERVER_APPLICATION_BACKEND || process.env.NEXT_PUBLIC_PROBE42_BACKEND;
+    const res = await fetch(`${backendBase}/universe/get-submodal-findings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(body),
