@@ -63,7 +63,7 @@ async function fetchDomesticRows(): Promise<MergedRow[]> {
 }
 
 async function fetchInternationalRows(): Promise<MergedRow[]> {
-  const backendBase = process.env.NEXT_PUBLIC_MOODYS_BACKEND;
+  const backendBase = process.env.SERVER_MOODYS_BACKEND || process.env.NEXT_PUBLIC_MOODYS_BACKEND;
   if (!backendBase) return [];
 
   const cookieStore = await cookies();

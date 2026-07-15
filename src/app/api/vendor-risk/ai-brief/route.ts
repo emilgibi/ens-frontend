@@ -9,7 +9,8 @@ export async function POST(req: NextRequest) {
     const accessToken = cookieStore.get('probe42_access_token')?.value
       ?? req.headers.get('authorization')?.replace('Bearer ', '');
 
-    const orchRes = await fetch(`${process.env.NEXT_PUBLIC_APPLICATION_ORCHESTRATION}/vendor-risk/ai-brief`, {
+    const orchestrationBase = process.env.SERVER_APPLICATION_ORCHESTRATION || process.env.NEXT_PUBLIC_APPLICATION_ORCHESTRATION;
+    const orchRes = await fetch(`${orchestrationBase}/vendor-risk/ai-brief`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
       body: JSON.stringify(body),

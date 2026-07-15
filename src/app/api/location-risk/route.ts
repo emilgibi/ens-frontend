@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const ORCH = process.env.NEXT_PUBLIC_APPLICATION_ORCHESTRATION;
+const ORCH = process.env.SERVER_APPLICATION_ORCHESTRATION || process.env.NEXT_PUBLIC_APPLICATION_ORCHESTRATION;
 
 export async function GET(req: NextRequest) {
   console.log('=== LOCATION RISK ROUTE HIT ===');

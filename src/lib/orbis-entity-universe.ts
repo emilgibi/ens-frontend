@@ -24,7 +24,7 @@ const MAX_SESSIONS = 1000;
 const MAX_ROWS_PER_SESSION = 1000;
 
 async function getMoodysAuth(): Promise<{ backendBase: string; token: string } | null> {
-  const backendBase = process.env.NEXT_PUBLIC_MOODYS_BACKEND;
+  const backendBase = process.env.SERVER_MOODYS_BACKEND || process.env.NEXT_PUBLIC_MOODYS_BACKEND;
   if (!backendBase) return null;
 
   const cookieStore = await cookies();

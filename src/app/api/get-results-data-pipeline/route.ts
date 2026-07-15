@@ -41,10 +41,16 @@ export async function POST(req: NextRequest) {
       return Response.json({ data: [], totalRecords: 0 });
     }
 
+    // Server-to-server call — prefer SERVER_* (private/localhost)
+    // over NEXT_PUBLIC_* (public-facing, meant for the browser). On a
+    // cloud VM these can differ: NEXT_PUBLIC_* often points at the VM's
+    // public IP so the browser can reach it, but a server process on
+    // that same VM calling its own public IP frequently hangs/fails
+    // (no hairpin NAT on many cloud providers, Azure included).
     const backendBase =
       screeningType === 'international'
-        ? process.env.NEXT_PUBLIC_MOODYS_BACKEND
-        : process.env.NEXT_PUBLIC_PROBE42_BACKEND;
+        ? (process.env.SERVER_MOODYS_BACKEND || process.env.NEXT_PUBLIC_MOODYS_BACKEND)
+        : (process.env.SERVER_APPLICATION_BACKEND || process.env.NEXT_PUBLIC_PROBE42_BACKEND);
 
     if (!backendBase) {
       return Response.json(

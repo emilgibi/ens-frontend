@@ -25,10 +25,10 @@ export async function GET(req: NextRequest) {
       cookieStore.get('moodys_access_token')?.value ??
       req.headers.get('authorization')?.replace('Bearer ', '');
 
-    const moodysOrchBase = process.env.NEXT_PUBLIC_MOODYS_ORCHESTRATION;
+    const moodysOrchBase = process.env.SERVER_MOODYS_ORCHESTRATION || process.env.NEXT_PUBLIC_MOODYS_ORCHESTRATION;
     if (!moodysOrchBase) {
       return NextResponse.json(
-        { error: 'NEXT_PUBLIC_MOODYS_ORCHESTRATION is not configured' },
+        { error: 'SERVER_MOODYS_ORCHESTRATION / NEXT_PUBLIC_MOODYS_ORCHESTRATION is not configured' },
         { status: 500 },
       );
     }
