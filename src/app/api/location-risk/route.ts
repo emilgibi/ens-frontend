@@ -27,18 +27,27 @@ export async function GET(req: NextRequest) {
       console.log('Political response status:', r.status);
       const text = await r.text();
       console.log('Political response body (first 200):', text.slice(0, 200));
+      if (!r.ok) {
+        throw new Error(`Political risk upstream returned ${r.status}: ${text.slice(0, 200)}`);
+      }
       return JSON.parse(text);
     }),
     fetch(climateUrl).then(async r => {
       console.log('Climate response status:', r.status);
       const text = await r.text();
       console.log('Climate response body (first 200):', text.slice(0, 200));
+      if (!r.ok) {
+        throw new Error(`Climate risk upstream returned ${r.status}: ${text.slice(0, 200)}`);
+      }
       return JSON.parse(text);
     }),
     fetch(infraUrl).then(async r => {
       console.log('Infra response status:', r.status);
       const text = await r.text();
       console.log('Infra response body (first 200):', text.slice(0, 200));
+      if (!r.ok) {
+        throw new Error(`Infrastructure risk upstream returned ${r.status}: ${text.slice(0, 200)}`);
+      }
       return JSON.parse(text);
     }),
   ]);
