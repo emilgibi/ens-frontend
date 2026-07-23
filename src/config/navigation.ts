@@ -4,6 +4,9 @@ import {
   LayoutDashboard,
   SearchCheck,
   MapPin,
+  ShieldAlert,
+  ClipboardList,
+  UserCheck,
 } from 'lucide-react';
 
 export const navigationItems: NavigationItem[] = [
@@ -26,5 +29,26 @@ export const navigationItems: NavigationItem[] = [
     name: 'Location360',
     href: '/location360',
     icon: MapPin,
+  },
+  {
+    name: 'Continuous Monitoring',
+    href: '/continuous-monitoring',
+    icon: ShieldAlert,
+    subitems: [
+      { name: 'Overview', href: '/continuous-monitoring' },
+      { name: 'Watchlist', href: '/continuous-monitoring/watchlist' },
+      { name: 'Alert Feed', href: '/continuous-monitoring/feed' },
+      { name: 'Configuration', href: '/continuous-monitoring/configuration' },
+    ],
+  },
+  {
+    name: 'Vendor Survey',
+    href: '/vendor-survey',
+    icon: ClipboardList,
+  },
+  {
+    name: 'Vendor Onboarding',
+    href: '/vendor-onboarding',
+    icon: UserCheck,
   },
 ];

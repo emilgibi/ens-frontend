@@ -2,6 +2,7 @@ export interface NavigationItem {
   name: string;
   href: string;
   icon: any;
+  badge?: string;
   subitems?: {
     name: string;
     href: string;

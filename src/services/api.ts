@@ -150,17 +150,19 @@ export const apiService = {
     return response.data;
   },
 
-  async getEntityProfile(ensId: string) {
+  async getEntityProfile(ensId: string, screeningType: ScreeningType = 'domestic') {
+    const { SUBMODAL_PROFILE } = getScreeningEndpoints(screeningType);
     const response = await apiClient.post(
-        API_ENDPOINTS.BACKEND.UNIVERSE_SUBMODAL_PROFILE,
+        SUBMODAL_PROFILE,
         { ens_id: ensId },
     );
     return response.data;
   },
 
-  async getEntityFindings(ensId: string) {
+  async getEntityFindings(ensId: string, screeningType: ScreeningType = 'domestic') {
+    const { SUBMODAL_FINDINGS } = getScreeningEndpoints(screeningType);
     const response = await apiClient.post(
-        API_ENDPOINTS.BACKEND.UNIVERSE_SUBMODAL_FINDINGS,
+        SUBMODAL_FINDINGS,
         { ens_id: ensId },
     );
     return response.data;

@@ -34,18 +34,18 @@ export function useLogin() {
   return useMutation({ mutationFn: apiService.login });
 }
 
-export function useEntityProfile(ensId: string) {
+export function useEntityProfile(ensId: string, screeningType: ScreeningType = 'domestic') {
   return useQuery({
     queryKey: queryKeys.entityProfile(ensId),
-    queryFn: () => apiService.getEntityProfile(ensId),
+    queryFn: () => apiService.getEntityProfile(ensId, screeningType),
     enabled: !!ensId,
   });
 }
 
-export function useEntityFindings(ensId: string) {
+export function useEntityFindings(ensId: string, screeningType: ScreeningType = 'domestic') {
   return useQuery({
     queryKey: queryKeys.entityFindings(ensId),
-    queryFn: () => apiService.getEntityFindings(ensId),
+    queryFn: () => apiService.getEntityFindings(ensId, screeningType),
     enabled: !!ensId,
   });
 }

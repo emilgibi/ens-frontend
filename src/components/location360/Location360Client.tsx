@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { Search, MapPin, Globe, ShieldAlert, CloudLightning, Building2 } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { Search, MapPin, Globe, ShieldAlert, CloudLightning, Building2, Check, X } from 'lucide-react';
 import PoliticalPanel from '@/components/location360/PoliticalPanel';
 import ClimatePanel   from '@/components/location360/ClimatePanel';
 import InfraPanel     from '@/components/location360/InfraPanel';
@@ -19,6 +19,27 @@ const LEVEL_BG: Record<string, string> = {
   Medium: '#fef9c3',
   High:   '#fee2e2',
 };
+
+// ── Small coverage indicator dot, shown per-dimension in the dropdown ──
+function CoverageDot({ label, covered }: { label: string; covered: boolean }) {
+  return (
+    <span
+      title={`${label}: ${covered ? 'data available' : 'no data'}`}
+      style={{
+        width: 16,
+        height: 16,
+        borderRadius: '50%',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: covered ? 'rgba(22,163,74,0.15)' : 'rgba(148,163,184,0.15)',
+        color: covered ? '#16a34a' : 'var(--muted-foreground)',
+      }}
+    >
+      {covered ? <Check size={10} /> : <X size={10} />}
+    </span>
+  );
+}
 
 // ── Mini score pill shown in the tab bar ──────────────────────────
 function TabScore({ score, level, active }: { score?: number; level?: string; active: boolean }) {
@@ -123,16 +144,92 @@ interface RiskResults {
 
 const EXAMPLE_LOCATIONS = ['Pune', 'Srinagar', 'Balasore', 'Chennai', 'Imphal West', 'Mumbai'];
 
+type LocationOption = {
+  name: string;
+  state: string | null;
+  political: boolean;
+  climate: boolean;
+  infrastructure: boolean;
+};
+
 export default function Location360Client() {
   const [query,     setQuery]     = useState('');
   const [loading,   setLoading]   = useState(false);
   const [results,   setResults]   = useState<RiskResults | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('political');
 
+  // ── Location autocomplete ──────────────────────────────────────────
+  // Fetched once on mount from /api/location-risk-options (backed by the
+  // orchestration's /location-risk/available-locations). Without this,
+  // users have no way to know which of the ~800 districts referenced by
+  // the underlying static files actually have data — most free-text
+  // guesses come back empty.
+  const [allLocations, setAllLocations] = useState<LocationOption[]>([]);
+  const [optionsLoading, setOptionsLoading] = useState(true);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [highlightIdx, setHighlightIdx] = useState(0);
+  const inputWrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${BASE}/api/location-risk-options`);
+        const data = await res.json();
+        if (!cancelled) {
+          if (res.ok && Array.isArray(data?.locations) && data.locations.length > 0) {
+            setAllLocations(data.locations);
+          } else if (res.ok && Array.isArray(data?.locations)) {
+            // Request succeeded but the list is genuinely empty — a real
+            // condition (backend data files missing/empty), not a fetch
+            // failure, but still needs surfacing rather than silently
+            // showing "no districts matching X" for every single search.
+            setOptionsError('Location list came back empty — check the orchestration logs for the /available-locations endpoint.');
+          } else {
+            setOptionsError(data?.error ?? `Request failed (status ${res.status})`);
+          }
+        }
+      } catch (err: any) {
+        if (!cancelled) setOptionsError(err?.message ?? 'Could not load location list');
+      } finally {
+        if (!cancelled) setOptionsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Close the dropdown on outside click.
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (inputWrapRef.current && !inputWrapRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const suggestions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const matches = allLocations.filter((l) => l.name.toLowerCase().includes(q));
+    // Prefix matches first, then full-coverage locations, then alphabetical.
+    matches.sort((a, b) => {
+      const aPrefix = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+      const bPrefix = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+      if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+      if (a.infrastructure !== b.infrastructure) return a.infrastructure ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return matches.slice(0, 8);
+  }, [query, allLocations]);
+
   const handleSearch = useCallback(async (loc?: string) => {
     const location = (loc ?? query).trim();
     if (!location) return;
 
+    setDropdownOpen(false);
     setLoading(true);
     setResults(null);
     if (loc) setQuery(loc);
@@ -214,15 +311,20 @@ export default function Location360Client() {
         padding: '18px 20px',
         marginBottom: 24,
         position: 'relative',
-        overflow: 'hidden',
+        // No overflow:hidden here — it used to clip the accent bar below
+        // to the card's rounded corners, but it was also clipping the
+        // autocomplete dropdown to the card's own height, cutting it off
+        // after ~1 row regardless of its own maxHeight. The bar now
+        // rounds its own corners instead (see below), so this container
+        // can stay overflow:visible and let the dropdown render fully.
       }}>
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: ACCENT, opacity: 0.6 }} />
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: ACCENT, opacity: 0.6, borderTopLeftRadius: 12, borderTopRightRadius: 12 }} />
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted-foreground)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
           <MapPin size={12} />
           Location Search
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1, position: 'relative' }}>
+          <div ref={inputWrapRef} style={{ flex: 1, position: 'relative' }}>
             <Search
               size={14}
               style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-foreground)', pointerEvents: 'none' }}
@@ -230,10 +332,43 @@ export default function Location360Client() {
             <input
               type='text'
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder='Enter a district or city name (e.g. Pune, Srinagar, Balasore)…'
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setDropdownOpen(true);
+                setHighlightIdx(0);
+              }}
+              onFocus={() => { if (query.trim()) setDropdownOpen(true); }}
+              onKeyDown={(e) => {
+                if (dropdownOpen && suggestions.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setHighlightIdx((i) => Math.min(i + 1, suggestions.length - 1));
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setHighlightIdx((i) => Math.max(i - 1, 0));
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    setDropdownOpen(false);
+                    return;
+                  }
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSearch(suggestions[highlightIdx].name);
+                    return;
+                  }
+                }
+                if (e.key === 'Enter') handleSearch();
+              }}
+              placeholder={
+                optionsLoading
+                  ? 'Loading available districts…'
+                  : 'Search a district or city (e.g. Pune, Srinagar, Balasore)…'
+              }
               disabled={loading}
+              autoComplete='off'
               style={{
                 width: '100%',
                 padding: '10px 14px 10px 34px',
@@ -246,6 +381,63 @@ export default function Location360Client() {
                 boxSizing: 'border-box',
               }}
             />
+
+            {/* ── Autocomplete dropdown ──────────────────────────────── */}
+            {dropdownOpen && query.trim() && (
+              <div style={{
+                position: 'absolute',
+                top: 'calc(100% + 4px)',
+                left: 0,
+                right: 0,
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+                zIndex: 20,
+                maxHeight: 280,
+                overflowY: 'auto',
+              }}>
+                {suggestions.length === 0 ? (
+                  <div style={{ padding: '12px 14px', fontSize: 12.5, color: 'var(--muted-foreground)' }}>
+                    {optionsError
+                      ? `Couldn't load the location list (${optionsError}). You can still try searching — some matches may work via fuzzy matching.`
+                      : `No districts matching "${query.trim()}" have risk data. Try a different spelling, or pick one of the examples below.`}
+                  </div>
+                ) : (
+                  suggestions.map((loc, idx) => (
+                    <div
+                      key={loc.name}
+                      onMouseDown={(e) => { e.preventDefault(); handleSearch(loc.name); }}
+                      onMouseEnter={() => setHighlightIdx(idx)}
+                      style={{
+                        padding: '9px 14px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        background: idx === highlightIdx ? 'var(--accent)' : 'transparent',
+                        borderBottom: idx < suggestions.length - 1 ? '1px solid var(--border)' : 'none',
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {loc.name}
+                        </div>
+                        {loc.state && (
+                          <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{loc.state}</div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                        <CoverageDot label='Political' covered={loc.political} />
+                        <CoverageDot label='Climate' covered={loc.climate} />
+                        <CoverageDot label='Infrastructure' covered={loc.infrastructure} />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
           <button
             onClick={() => handleSearch()}
@@ -306,6 +498,16 @@ export default function Location360Client() {
             </button>
           ))}
         </div>
+
+        {/* Coverage summary — sets expectations before the user even searches */}
+        {!optionsLoading && allLocations.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 10 }}>
+            {allLocations.filter((l) => l.infrastructure).length.toLocaleString()} districts have full
+            political + climate + infrastructure coverage
+            &nbsp;·&nbsp;{allLocations.length.toLocaleString()} total districts have at least one dimension of data.
+            Start typing above to see which ones match.
+          </div>
+        )}
       </div>
 
       {/* ── Spinner / empty / error states ──────────────────────── */}

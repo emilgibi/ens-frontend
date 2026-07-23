@@ -148,5 +148,18 @@ export const getScreeningEndpoints = (screeningType: ScreeningType) => {
         screeningType === 'domestic'
             ? `${ORCHESTRATION}/probe42/nameSearch`
             : `${ORCHESTRATION}/moodys/nameSearch`,
+    // Entity Universe "eye" overview sheet — Probe42 exposes these under
+    // /universe/*, Orbis under /graph/*, but both are backed by the same
+    // compile_company_profile()/pull_ratings() functions and return the
+    // identical {profile, ratings, metadata} shape, so the same frontend
+    // sheet component works for both unchanged.
+    SUBMODAL_PROFILE:
+        screeningType === 'domestic'
+            ? `${BACKEND}/universe/get-submodal-profile`
+            : `${BACKEND}/graph/get-submodal-profile`,
+    SUBMODAL_FINDINGS:
+        screeningType === 'domestic'
+            ? `${BACKEND}/universe/get-submodal-findings`
+            : `${BACKEND}/graph/get-submodal-findings`,
   }
 }
