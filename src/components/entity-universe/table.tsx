@@ -19,6 +19,13 @@ type User = {
   panId?: string;
   address?: string;
   overallSupplierRating?: string;
+  thematicRating?: {
+    entity_existence?: string;
+    financials?: string;
+    adverse_media?: string;
+    legal?: string;
+    cyber_esg?: string;
+  } | null;
   lastScreenedDate?: Date;
   lastSessionId?: string;
   ensId?: string;
@@ -133,6 +140,68 @@ export default function EntityUniverseTable({
             { label: 'Low',    value: 'Low'    },
           ],
         },
+      },
+    },
+    // ── Individual KPI ratings ──────────────────────────────────────────
+    // These live in the thematic_rating JSONB column on entity_universe,
+    // the same source that already powers the "Risk Indicators" section
+    // in the eye-icon overview sheet (components/entity-universe/overview.tsx).
+    // getUniverseData() already selects every column via a plain
+    // drizzle select(), so thematicRating was already coming through —
+    // it just wasn't rendered as its own columns before.
+    {
+      id: 'entityExistence',
+      header: 'Entity Existence',
+      size: 140,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.thematicRating?.entity_existence as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
+      },
+    },
+    {
+      id: 'financials',
+      header: 'Financials',
+      size: 120,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.thematicRating?.financials as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
+      },
+    },
+    {
+      id: 'adverseMedia',
+      header: 'Adverse Media',
+      size: 130,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.thematicRating?.adverse_media as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
+      },
+    },
+    {
+      id: 'legal',
+      header: 'Legal',
+      size: 100,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.thematicRating?.legal as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
+      },
+    },
+    {
+      id: 'additionalIndicators',
+      header: 'Additional Indicators',
+      size: 150,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.thematicRating?.cyber_esg as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
       },
     },
     { accessorKey: 'ensId', header: 'System ID', size: 300 },

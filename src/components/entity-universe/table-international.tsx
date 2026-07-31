@@ -6,6 +6,7 @@ import { ColumnDef } from '@tanstack/react-table';
 import { FileTextIcon, Eye } from 'lucide-react';
 import { DownloadDropdown } from '../shared/download-button';
 import OverviewSheet from './overview-sheet';
+import { RiskBadge, RiskLevel } from './risk-badge';
 import { getApiUrl } from '@/lib/utils';
 
 type InternationalEntity = {
@@ -21,6 +22,11 @@ type InternationalEntity = {
   postcode?: string;
   address?: string;
   bvdId?: string;
+  entityExistence?: string;
+  financials?: string;
+  adverseMedia?: string;
+  legal?: string;
+  additionalIndicators?: string;
 };
 
 export default function EntityUniverseTableInternational() {
@@ -79,6 +85,68 @@ export default function EntityUniverseTableInternational() {
     { accessorKey: 'state', header: 'State', size: 120 },
     { accessorKey: 'city', header: 'City', size: 120 },
     { accessorKey: 'address', header: 'Address', size: 250 },
+    // ── Individual KPI ratings ──────────────────────────────────────────
+    // Enriched server-side in /api/entity-universe-international for just
+    // the current page's rows (see getEntityRatingsBulk in
+    // lib/orbis-entity-universe.ts) — Orbis has no bulk source for these
+    // the way Probe42's entity_universe.thematic_rating column is, so
+    // each page load does one /graph/get-submodal-profile call per row
+    // shown (typically 10), not per entity in the whole universe.
+    {
+      id: 'entityExistence',
+      header: 'Entity Existence',
+      size: 140,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.entityExistence as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
+      },
+    },
+    {
+      id: 'financials',
+      header: 'Financials',
+      size: 120,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.financials as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
+      },
+    },
+    {
+      id: 'adverseMedia',
+      header: 'Adverse Media',
+      size: 130,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.adverseMedia as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
+      },
+    },
+    {
+      id: 'legal',
+      header: 'Legal',
+      size: 100,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.legal as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
+      },
+    },
+    {
+      id: 'additionalIndicators',
+      header: 'Additional Indicators',
+      size: 150,
+      enableSorting: false,
+      meta: { filterVariant: 'none' },
+      cell: ({ row }) => {
+        const rating = row.original.additionalIndicators as RiskLevel | undefined;
+        return rating ? <RiskBadge risk={rating} /> : <span className="text-gray-400">-</span>;
+      },
+    },
     {
       id: 'actions',
       header: 'Download',

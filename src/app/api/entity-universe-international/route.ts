@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getAllInternationalEntities } from '@/lib/orbis-entity-universe';
+import { getAllInternationalEntities, getEntityRatingsBulk } from '@/lib/orbis-entity-universe';
 
 function toCamelCase(key: string): string {
   return key.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
@@ -46,7 +46,26 @@ export async function POST(req: NextRequest) {
 
     const totalRecords = entities.length;
     const start = (page - 1) * pageSize;
-    const data = entities.slice(start, start + pageSize);
+    const pageRows = entities.slice(start, start + pageSize);
+
+    // Enrich only this page's rows with KPI ratings — bounded to
+    // pageSize calls (typically 10) rather than the entire entity
+    // universe, unlike getInternationalRiskCounts which genuinely needs
+    // every entity to compute an accurate distribution for the stat card.
+    const ensIds = pageRows.map((r) => r['ensId'] as string).filter(Boolean);
+    const ratingsById = await getEntityRatingsBulk(ensIds);
+
+    const data = pageRows.map((row) => {
+      const ratings = ratingsById[row['ensId'] as string];
+      return {
+        ...row,
+        entityExistence: ratings?.entity_existence ?? null,
+        financials: ratings?.financials ?? null,
+        adverseMedia: ratings?.adverse_media ?? null,
+        legal: ratings?.legal ?? null,
+        additionalIndicators: ratings?.cyber_esg ?? null,
+      };
+    });
 
     return Response.json({ data, totalRecords });
   } catch (err: any) {

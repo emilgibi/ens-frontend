@@ -87,11 +87,31 @@ async function fetchEntitiesForSession(
   }
 }
 
-async function fetchEntityRating(
+export type EntityRatings = {
+  supplier?: string;
+  entity_existence?: string;
+  financials?: string;
+  adverse_media?: string;
+  legal?: string;
+  cyber_esg?: string;
+  [key: string]: string | undefined;
+};
+
+/**
+ * Fetches the FULL ratings object for one entity via Orbis's
+ * /graph/get-submodal-profile — the same endpoint and same
+ * compile_company_profile()/pull_ratings() functions that power the
+ * eye-icon overview sheet, and the same shape Probe42's equivalent
+ * /universe/get-submodal-profile returns. Returns null on any failure
+ * (missing data, network error, etc.) rather than throwing, since this
+ * is used to enrich list/table rows where one bad entity shouldn't break
+ * the whole page.
+ */
+async function fetchEntityRatings(
   ensId: string,
   backendBase: string,
   token: string,
-): Promise<string | null> {
+): Promise<EntityRatings | null> {
   try {
     const res = await fetch(`${backendBase}/graph/get-submodal-profile`, {
       method: 'POST',
@@ -103,9 +123,7 @@ async function fetchEntityRating(
     });
     if (!res.ok) return null;
     const data = await res.json();
-    // Same shape as Probe42's compile_company_profile (identical function,
-    // both backends): { profile, ratings: { supplier: 'high'|'medium'|'low', ... }, metadata }
-    return data?.ratings?.supplier ?? null;
+    return data?.ratings ?? null;
   } catch {
     return null;
   }
@@ -136,17 +154,41 @@ export async function getInternationalRiskCounts(
     entities
       .map((e) => e['ens_id'])
       .filter(Boolean)
-      .map((ensId) => fetchEntityRating(ensId, backendBase, token)),
+      .map((ensId) => fetchEntityRatings(ensId, backendBase, token)),
   );
 
   const counts: RiskCounts = { high: 0, medium: 0, low: 0 };
-  for (const rating of ratings) {
-    const normalized = rating?.toLowerCase();
+  for (const r of ratings) {
+    const normalized = r?.supplier?.toLowerCase();
     if (normalized === 'high') counts.high++;
     else if (normalized === 'medium') counts.medium++;
     else if (normalized === 'low') counts.low++;
   }
   return counts;
+}
+
+/**
+ * Fetches full KPI ratings (entity_existence, financials, adverse_media,
+ * legal, cyber_esg — the same 5 shown in the eye-icon overview sheet) for
+ * a specific set of entities, keyed by ens_id. Unlike
+ * getInternationalRiskCounts (which needs every entity to compute an
+ * accurate distribution), this is meant to be called with just the
+ * entities on the current table page — e.g. 10 at a time — so the N+1
+ * cost stays small on every page load instead of scaling with the full
+ * entity universe.
+ */
+export async function getEntityRatingsBulk(
+  ensIds: string[],
+): Promise<Record<string, EntityRatings | null>> {
+  const auth = await getMoodysAuth();
+  if (!auth) return {};
+  const { backendBase, token } = auth;
+
+  const results = await Promise.all(
+    ensIds.map(async (ensId) => [ensId, await fetchEntityRatings(ensId, backendBase, token)] as const),
+  );
+
+  return Object.fromEntries(results);
 }
 
 export async function getAllInternationalEntities(): Promise<Record<string, any>[]> {
