@@ -152,7 +152,7 @@ type LocationOption = {
   infrastructure: boolean;
 };
 
-export default function Location360Client() {
+export default function Location360Client({ initialLocation, title }: { initialLocation?: string | null; title?: string }) {
   const [query,     setQuery]     = useState('');
   const [loading,   setLoading]   = useState(false);
   const [results,   setResults]   = useState<RiskResults | null>(null);
@@ -248,6 +248,22 @@ export default function Location360Client() {
     }
   }, [query]);
 
+  // If embedded elsewhere, allow an initial location to be supplied
+  // (e.g. entity head-office). When provided, prefill and run the search.
+  /* When embedded, auto-run the initial location once. We intentionally
+     ignore `handleSearch` in deps to avoid rerunning the initial search
+     when the user types (which would recreate `handleSearch`). */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (typeof initialLocation === 'string' && initialLocation.trim()) {
+      const loc = initialLocation.trim();
+      setQuery(loc);
+      // run search; small timeout to ensure UI is stable
+      const t = setTimeout(() => handleSearch(loc), 50);
+      return () => clearTimeout(t);
+    }
+  }, [initialLocation]);
+
   const pol = results?.political;
   const cli = results?.climate;
   const inf = results?.infra;
@@ -285,22 +301,22 @@ export default function Location360Client() {
       {/* ── Page header ─────────────────────────────────────────── */}
       <div style={{ marginBottom: 28 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: 'var(--primary)', color: 'var(--primary-foreground)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Globe size={16} />
+            <div style={{
+              width: 32, height: 32, borderRadius: 8,
+              background: 'var(--primary)', color: 'var(--primary-foreground)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Globe size={16} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--foreground)', lineHeight: 1 }}>
+                {title ?? 'Location360'}
+              </h1>
+            </div>
           </div>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--foreground)', lineHeight: 1 }}>
-              Location360
-            </h1>
-          </div>
-        </div>
-        <p style={{ fontSize: 13, color: 'var(--muted-foreground)', marginTop: 6 }}>
-          Static risk assessment for Indian districts across Political, Climate, and Infrastructure dimensions.
-        </p>
+          <p style={{ fontSize: 13, color: 'var(--muted-foreground)', marginTop: 6 }}>
+            Static risk assessment for Indian districts across Political, Climate, and Infrastructure dimensions.
+          </p>
       </div>
 
       {/* ── Search bar ──────────────────────────────────────────── */}

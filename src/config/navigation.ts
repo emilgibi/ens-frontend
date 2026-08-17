@@ -26,11 +26,6 @@ export const navigationItems: NavigationItem[] = [
     icon: History,
   },
   {
-    name: 'Location360',
-    href: '/location360',
-    icon: MapPin,
-  },
-  {
     name: 'Continuous Monitoring',
     href: '/continuous-monitoring',
     icon: ShieldAlert,

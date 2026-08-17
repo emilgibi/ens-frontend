@@ -15,6 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { getApiUrl } from '@/lib/utils';
 import { apiService } from '@/services/api';
+import Location360Client from '@/components/location360/Location360Client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type SelectedEntity = {
@@ -343,7 +344,7 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
   const [error, setError]                       = useState<string | null>(null);
   const [displayName, setDisplayName]           = useState<string | null>(null);
   const [lastIdentifier, setLastIdentifier]     = useState('');
-  const [activeTab, setActiveTab]               = useState<'generic' | 'procurement'>('generic');
+  const [activeTab, setActiveTab]               = useState<'generic' | 'procurement' | 'location360'>('generic');
   const [cvCr, setCvCr]                         = useState(0);
   const [category, setCategory]                 = useState('Raw Materials / APIs');
   const [duration, setDuration]                 = useState(12);
@@ -661,6 +662,13 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
   const peer    = d.peer_comparison?.[0]?.benchMarks?.[0];
   const name    = displayName ?? reportData?.name ?? '';
 
+  // Default location to use for Location360 card: prefer ENS profile location,
+  // then probe42 registered city, then registered_address full address.
+  const defaultLocation = (
+    ensProfile?.location?.district ?? ensProfile?.location?.city ??
+    d.company?.registered_address?.city ?? d.company?.registered_address?.full_address ?? null
+  );
+
   const standalone = fin.filter((f: any) => f.nature === 'STANDALONE');
   const ratioTrend = (standalone.length ? standalone : fin)
     .sort((a: any, b: any) => a.year?.localeCompare(b.year))
@@ -811,11 +819,11 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
       {/* ── Tab switcher — always visible ── */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', marginTop: '12px' }}>
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
-          {(['generic', 'procurement'] as const).map(key => (
+          {(['generic', 'procurement', 'location360'] as const).map(key => (
             <button key={key} onClick={() => setActiveTab(key)}
               style={{ padding: '12px 20px', fontSize: '12px', fontWeight: activeTab === key ? 700 : 400, color: activeTab === key ? 'var(--foreground)' : 'var(--muted-foreground)', background: 'none', border: 'none', borderBottom: activeTab === key ? `2px solid ${ACCENT}` : '2px solid transparent', cursor: 'pointer', marginBottom: '-1px', display: 'flex', alignItems: 'center', gap: '6px' }}>
               {activeTab === key && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: ACCENT }} />}
-              {key === 'generic' ? 'Generic Profiling' : 'Procurement / SCM'}
+              {key === 'generic' ? 'Generic Profiling' : key === 'procurement' ? 'Procurement / SCM' : 'Location Risk'}
             </button>
           ))}
         </div>
@@ -859,6 +867,17 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
         {activeTab === 'procurement' && (
           <div style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--muted-foreground)' }}>
             Scroll down to see Vendor Tier Recommendation, ITC Risk, Payment Terms, and more.
+          </div>
+        )}
+
+        {/* ── Location360 tab content ── */}
+        {activeTab === 'location360' && (
+          <div style={{ padding: '12px 16px' }}>
+            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>Location360</div>
+              <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>Default: head office · add more locations</div>
+            </div>
+            <Location360Client initialLocation={defaultLocation} title="Location Risk" />
           </div>
         )}
       </div>
@@ -1239,6 +1258,7 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
             const add  = getKpi(existenceData, 'ADD1A');
             const b2b  = getKpi(existenceData, 'B2B1A');
             const dom  = getKpi(existenceData, 'DOM1A');
+          
             const hasAny = add || b2b || dom;
 
             const parseDetails = (kpi: any): any[] => {
