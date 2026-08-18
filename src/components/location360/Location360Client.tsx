@@ -42,24 +42,7 @@ function CoverageDot({ label, covered }: { label: string; covered: boolean }) {
 }
 
 // ── Mini score pill shown in the tab bar ──────────────────────────
-function TabScore({ score, level, active }: { score?: number; level?: string; active: boolean }) {
-  if (score == null) return null;
-  const color = LEVEL_COLORS[level ?? ''] ?? '#64748b';
-  return (
-    <span style={{
-      padding: '1px 8px',
-      borderRadius: 10,
-      fontSize: 12,
-      fontWeight: 600,
-      background: active ? color : 'rgba(0,0,0,0.06)',
-      color: active ? '#fff' : 'var(--foreground)',
-      marginLeft: 4,
-    }}>
-      {score.toFixed(1)}
-      <span style={{ fontWeight: 400, opacity: 0.85, marginLeft: 3 }}>{level}</span>
-    </span>
-  );
-}
+// TabScore removed — scores shown elsewhere were eliminated per UX request.
 
 // ── Summary gauge strip ───────────────────────────────────────────
 function SummaryStrip({ pol, cli, inf }: { pol: any; cli: any; inf: any }) {
@@ -152,11 +135,25 @@ type LocationOption = {
   infrastructure: boolean;
 };
 
-export default function Location360Client({ initialLocation, title }: { initialLocation?: string | null; title?: string }) {
+export default function Location360Client({ initialLocation, initialLocations, entityId, title, onLocationsChange }: { initialLocation?: string | null; initialLocations?: string[]; entityId?: string | null; title?: string; onLocationsChange?: (l: string[]) => void }) {
   const [query,     setQuery]     = useState('');
   const [loading,   setLoading]   = useState(false);
   const [results,   setResults]   = useState<RiskResults | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('political');
+  const [selectedLocations, setSelectedLocations] = useState<string[]>(() => {
+    const init = initialLocations ?? [];
+    if (initialLocation && !init.includes(initialLocation)) return [initialLocation, ...init];
+    return init;
+  });
+  const [resultsByLocation, setResultsByLocation] = useState<Record<string, RiskResults | null>>({});
+  const [activeSavedLocation, setActiveSavedLocation] = useState<string | null>(null);
+
+  // Sync when parent supplies new initial locations (e.g. on new entity search)
+  useEffect(() => {
+    const init = initialLocations ?? [];
+    if (initialLocation && !init.includes(initialLocation)) setSelectedLocations([initialLocation, ...init]);
+    else setSelectedLocations(init);
+  }, [initialLocation, initialLocations]);
 
   // ── Location autocomplete ──────────────────────────────────────────
   // Fetched once on mount from /api/location-risk-options (backed by the
@@ -210,6 +207,46 @@ export default function Location360Client({ initialLocation, title }: { initialL
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
+  function saveLocation(loc: string) {
+    (async () => {
+      // ensure we have cached data for this location, but don't change
+      // the main `results` UI — `Analyse` should control that.
+      if (!resultsByLocation[loc]) {
+        await fetchAndStore(loc);
+      }
+      setSelectedLocations((prev) => {
+        if (prev.includes(loc)) return prev;
+        const next = [loc, ...prev];
+        return next;
+      });
+      // Do not call `setActiveSavedLocation` here — creating the tab
+      // shouldn't switch the main view. The user can click the tab to
+      // view its detailed info.
+    })();
+  }
+
+  function removeLocation(loc: string) {
+    // Remove the location from the saved list, and if it was the
+    // currently active saved view, clear the activeSavedLocation so
+    // no saved-location information remains visible.
+    setSelectedLocations((prev) => prev.filter((p) => p !== loc));
+    setActiveSavedLocation((cur) => (cur === loc ? null : cur));
+  }
+
+  // Fetch data for a location and store in resultsByLocation without changing the main `results` UI.
+  async function fetchAndStore(location: string) {
+    const loc = location.trim();
+    if (!loc) return;
+    try {
+      const res = await fetch(`${BASE}/api/location-risk?location=${encodeURIComponent(loc)}&type=all`);
+      const data = await res.json();
+      setResultsByLocation((prev) => ({ ...prev, [loc]: data }));
+    } catch (err: any) {
+      const val = { politicalError: err?.message ?? 'Network error' } as any;
+      setResultsByLocation((prev) => ({ ...prev, [loc]: val }));
+    }
+  }
+
   const suggestions = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
@@ -227,6 +264,9 @@ export default function Location360Client({ initialLocation, title }: { initialL
 
   const handleSearch = useCallback(async (loc?: string) => {
     const location = (loc ?? query).trim();
+    // debug: log search attempts
+    // eslint-disable-next-line no-console
+    console.log('[Location360] handleSearch', { loc, query, location });
     if (!location) return;
 
     setDropdownOpen(false);
@@ -237,16 +277,77 @@ export default function Location360Client({ initialLocation, title }: { initialL
     try {
       const res = await fetch(`${BASE}/api/location-risk?location=${encodeURIComponent(location)}&type=all`);
       const data = await res.json();
+      // cache per-location results and set active result
+      setResultsByLocation((prev) => ({ ...prev, [location]: data }));
       setResults(data);
       if      (data.political) setActiveTab('political');
       else if (data.climate)   setActiveTab('climate');
       else if (data.infra)     setActiveTab('infra');
     } catch (err: any) {
-      setResults({ politicalError: err?.message ?? 'Network error' });
+      const val = { politicalError: err?.message ?? 'Network error' } as any;
+      setResultsByLocation((prev) => ({ ...prev, [location]: val }));
+      setResults(val);
     } finally {
       setLoading(false);
     }
   }, [query]);
+
+  // Ensure any selected locations have cached data (fetch missing ones in background)
+  useEffect(() => {
+    selectedLocations.forEach((loc) => {
+      if (!resultsByLocation[loc]) fetchAndStore(loc);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLocations]);
+
+  // Ensure activeSavedLocation is cleared if its entry is removed; don't
+  // auto-select a saved tab — the default view should remain the live
+  // `initialLocation` head-office result unless the user explicitly
+  // clicks a saved tab.
+  useEffect(() => {
+    if (selectedLocations.length === 0) {
+      setActiveSavedLocation(null);
+      return;
+    }
+    setActiveSavedLocation((prev) => (prev && !selectedLocations.includes(prev) ? null : prev));
+  }, [selectedLocations]);
+
+  // Load saved-location list for this entity from localStorage (if any).
+  useEffect(() => {
+    if (!entityId) return;
+    try {
+      const raw = localStorage.getItem(`location360.saved.${entityId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setSelectedLocations(parsed as string[]);
+          return;
+        }
+      }
+      // if no saved list, fall back to initialLocations passed from parent
+      if (initialLocations && initialLocations.length > 0) setSelectedLocations(initialLocations);
+    } catch (e) {
+      // ignore
+    }
+  }, [entityId]);
+
+  // Persist saved-location list per-entity
+  useEffect(() => {
+    if (!entityId) return;
+    try {
+      localStorage.setItem(`location360.saved.${entityId}`, JSON.stringify(selectedLocations));
+    } catch (e) {
+      // ignore quota errors
+    }
+  }, [entityId, selectedLocations]);
+
+  // Notify parent of saved-locations changes, but do it in an effect
+  // to avoid updating parent state while the child is rendering.
+  useEffect(() => {
+    if (!onLocationsChange) return;
+    onLocationsChange(selectedLocations);
+    // Intentionally run whenever `selectedLocations` changes.
+  }, [onLocationsChange, selectedLocations]);
 
   // If embedded elsewhere, allow an initial location to be supplied
   // (e.g. entity head-office). When provided, prefill and run the search.
@@ -263,6 +364,30 @@ export default function Location360Client({ initialLocation, title }: { initialL
       return () => clearTimeout(t);
     }
   }, [initialLocation]);
+
+  // Load cached per-entity results (if any)
+  useEffect(() => {
+    if (!entityId) return;
+    try {
+      const raw = localStorage.getItem(`location360.cache.${entityId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') setResultsByLocation(parsed as Record<string, RiskResults>);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [entityId]);
+
+  // Persist cache whenever resultsByLocation changes
+  useEffect(() => {
+    if (!entityId) return;
+    try {
+      localStorage.setItem(`location360.cache.${entityId}`, JSON.stringify(resultsByLocation));
+    } catch (e) {
+      // ignore quota errors
+    }
+  }, [entityId, resultsByLocation]);
 
   const pol = results?.political;
   const cli = results?.climate;
@@ -296,6 +421,19 @@ export default function Location360Client({ initialLocation, title }: { initialL
     },
   ];
 
+  // Active saved location resolved data (if any)
+  const activeSavedResult = activeSavedLocation ? (resultsByLocation[activeSavedLocation] ?? null) : null;
+  const polS = activeSavedResult?.political;
+  const cliS = activeSavedResult?.climate;
+  const infS = activeSavedResult?.infra;
+  const resolvedS = polS?.resolved_location ?? cliS?.resolved_location ?? infS?.resolved_location ?? null;
+  const allFailedS = activeSavedResult && !polS && !cliS && !infS;
+  const tabsLocal: { id: TabId; icon: React.ReactNode; label: string; score?: number; level?: string }[] = [
+    { id: 'political', icon: <ShieldAlert size={14} />, label: 'Political & Security', score: polS?.political_static_risk?.score, level: polS?.political_static_risk?.level },
+    { id: 'climate',   icon: <CloudLightning size={14} />, label: 'Climate & Environment', score: cliS?.climate_static_risk?.score, level: cliS?.climate_static_risk?.level },
+    { id: 'infra',     icon: <Building2 size={14} />, label: 'Infrastructure Risk', score: infS?.infrastructure_static_risk?.score, level: infS?.infrastructure_static_risk?.level },
+  ];
+
   return (
     <div>
       {/* ── Page header ─────────────────────────────────────────── */}
@@ -317,6 +455,33 @@ export default function Location360Client({ initialLocation, title }: { initialL
           <p style={{ fontSize: 13, color: 'var(--muted-foreground)', marginTop: 6 }}>
             Static risk assessment for Indian districts across Political, Climate, and Infrastructure dimensions.
           </p>
+          {/* Saved-location tabs (persisted per-entity) */}
+          {selectedLocations.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+              {selectedLocations.map((loc) => (
+                <div
+                  key={loc}
+                  onClick={() => setActiveSavedLocation(loc)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '6px 12px', borderRadius: 999,
+                    border: activeSavedLocation === loc ? `2px solid ${ACCENT}` : '1px solid var(--border)',
+                    background: activeSavedLocation === loc ? 'var(--card)' : 'transparent',
+                    cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                  }}
+                >
+                  <span>{loc}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeLocation(loc); }}
+                    title="Unsave location"
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, padding: 0 }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
       </div>
 
       {/* ── Search bar ──────────────────────────────────────────── */}
@@ -456,7 +621,7 @@ export default function Location360Client({ initialLocation, title }: { initialL
             )}
           </div>
           <button
-            onClick={() => handleSearch()}
+            onClick={() => handleSearch(query)}
             disabled={loading || !query.trim()}
             style={{
               padding: '10px 22px',
@@ -487,6 +652,22 @@ export default function Location360Client({ initialLocation, title }: { initialL
               <Search size={14} />
             )}
             {loading ? 'Analysing…' : 'Analyse'}
+          </button>
+          <button
+            onClick={() => saveLocation((resolved as any)?.district ?? (resolved as any)?.name ?? query.trim())}
+            disabled={!results}
+            style={{
+              padding: '10px 14px',
+              background: !results ? 'var(--muted)' : 'var(--secondary)',
+              color: !results ? 'var(--muted-foreground)' : 'var(--secondary-foreground)',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: !results ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Save
           </button>
         </div>
 
@@ -525,6 +706,53 @@ export default function Location360Client({ initialLocation, title }: { initialL
           </div>
         )}
       </div>
+
+        {/* ── Saved location detail view ─────────────────────────── */}
+        {activeSavedResult && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              borderRadius: 10,
+              padding: '12px 16px',
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 8,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <MapPin size={14} style={{ color: LEVEL_COLORS[polS?.political_static_risk?.level ?? cliS?.climate_static_risk?.level ?? 'Low'] }} />
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--foreground)' }}>{resolvedS?.district ?? activeSavedLocation}</span>
+                {resolvedS?.state && (
+                  <span style={{ fontSize: 12, color: 'var(--muted-foreground)', background: 'var(--muted)', padding: '2px 8px', borderRadius: 6 }}>{resolvedS.state}</span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {resolvedS?.method && <span style={{ fontSize: 11, background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: 8, fontWeight: 500 }}>{resolvedS.method.replace(/_/g, ' ')}</span>}
+                {resolvedS?.confidence != null && <span style={{ fontSize: 11, background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: 8, fontWeight: 500 }}>{(resolvedS.confidence * 100).toFixed(0)}% confidence</span>}
+              </div>
+            </div>
+
+            <SummaryStrip pol={polS} cli={cliS} inf={infS} />
+
+            <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)', marginBottom: 0 }}>
+                {tabsLocal.map(({ id, icon, label }) => {
+                const isActive = activeTab === id;
+                return (
+                  <button key={id} onClick={() => setActiveTab(id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', fontSize: 13, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--foreground)' : 'var(--muted-foreground)', background: 'none', border: 'none', borderBottom: isActive ? `2px solid ${ACCENT}` : '2px solid transparent', cursor: 'pointer', transition: 'all 0.15s', marginBottom: -1, whiteSpace: 'nowrap' }}>{icon}{label}</button>
+                );
+              })}
+            </div>
+
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 12px 12px', overflow: 'hidden', marginBottom: 32 }}>
+              {activeTab === 'political' && <PoliticalPanel data={polS} error={activeSavedResult.politicalError} />}
+              {activeTab === 'climate' && <ClimatePanel data={cliS} error={activeSavedResult.climateError} />}
+              {activeTab === 'infra' && <InfraPanel data={infS} error={activeSavedResult.infraError} />}
+            </div>
+          </div>
+        )}
 
       {/* ── Spinner / empty / error states ──────────────────────── */}
       {loading && (
@@ -565,7 +793,7 @@ export default function Location360Client({ initialLocation, title }: { initialL
       )}
 
       {/* ── Results ─────────────────────────────────────────────── */}
-      {results && (pol || cli || inf) && (
+      {!activeSavedLocation && results && (pol || cli || inf) && (
         <>
           {/* Location banner */}
           <div style={{
@@ -614,7 +842,7 @@ export default function Location360Client({ initialLocation, title }: { initialL
             borderBottom: '1px solid var(--border)',
             marginBottom: 0,
           }}>
-            {tabs.map(({ id, icon, label, score, level }) => {
+            {tabs.map(({ id, icon, label }) => {
               const isActive = activeTab === id;
               return (
                 <button
@@ -639,11 +867,22 @@ export default function Location360Client({ initialLocation, title }: { initialL
                 >
                   {icon}
                   {label}
-                  <TabScore score={score} level={level} active={isActive} />
                 </button>
               );
             })}
           </div>
+          {/* Selected locations chips */}
+                  {selectedLocations.length > 0 && (
+                    <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {selectedLocations.map((loc) => (
+                        <div key={loc} style={{ padding: '6px 10px', borderRadius: 14, background: '#f3f3f3', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 13 }}>{loc}</span>
+                          <button onClick={() => removeLocation(loc)} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
 
           {/* Panel container */}
           <div style={{

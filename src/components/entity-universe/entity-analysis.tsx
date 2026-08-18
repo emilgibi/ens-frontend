@@ -345,6 +345,7 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
   const [displayName, setDisplayName]           = useState<string | null>(null);
   const [lastIdentifier, setLastIdentifier]     = useState('');
   const [activeTab, setActiveTab]               = useState<'generic' | 'procurement' | 'location360'>('generic');
+  const [savedLocations, setSavedLocations]     = useState<string[]>([]);
   const [cvCr, setCvCr]                         = useState(0);
   const [category, setCategory]                 = useState('Raw Materials / APIs');
   const [duration, setDuration]                 = useState(12);
@@ -669,6 +670,22 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
     d.company?.registered_address?.city ?? d.company?.registered_address?.full_address ?? null
   );
 
+  // Load per-entity saved locations from localStorage when identifier changes
+  useEffect(() => {
+    if (!lastIdentifier) return;
+    try {
+      const key = `location360.saved.${lastIdentifier}`;
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) setSavedLocations(arr);
+        else setSavedLocations([]);
+      } else setSavedLocations([]);
+    } catch (e) {
+      setSavedLocations([]);
+    }
+  }, [lastIdentifier]);
+
   const standalone = fin.filter((f: any) => f.nature === 'STANDALONE');
   const ratioTrend = (standalone.length ? standalone : fin)
     .sort((a: any, b: any) => a.year?.localeCompare(b.year))
@@ -877,7 +894,16 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>Location360</div>
               <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>Default: head office · add more locations</div>
             </div>
-            <Location360Client initialLocation={defaultLocation} title="Location Risk" />
+            <Location360Client
+              initialLocation={defaultLocation}
+              initialLocations={savedLocations}
+              entityId={lastIdentifier}
+              title="Location Risk"
+              onLocationsChange={(locs) => {
+                setSavedLocations(locs);
+                try { localStorage.setItem(`location360.saved.${lastIdentifier}`, JSON.stringify(locs)); } catch { /* ignore */ }
+              }}
+            />
           </div>
         )}
       </div>
