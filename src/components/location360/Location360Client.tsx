@@ -148,11 +148,22 @@ export default function Location360Client({ initialLocation, initialLocations, e
   const [resultsByLocation, setResultsByLocation] = useState<Record<string, RiskResults | null>>({});
   const [activeSavedLocation, setActiveSavedLocation] = useState<string | null>(null);
 
-  // Sync when parent supplies new initial locations (e.g. on new entity search)
+  // Sync when parent supplies new initial locations (e.g. on new entity search).
+  // Guard against no-op updates: `initialLocations` can arrive as a brand-new
+  // array reference with identical contents (e.g. round-tripped through the
+  // parent via onLocationsChange, or re-parsed from localStorage). Without
+  // this content check, setSelectedLocations would fire with a new reference
+  // every time, which re-notifies the parent via onLocationsChange, which
+  // hands back a new prop reference, forming an infinite render loop that
+  // eventually trips "Maximum update depth exceeded" downstream (in the
+  // fetchAndStore effect below).
   useEffect(() => {
     const init = initialLocations ?? [];
-    if (initialLocation && !init.includes(initialLocation)) setSelectedLocations([initialLocation, ...init]);
-    else setSelectedLocations(init);
+    const next = initialLocation && !init.includes(initialLocation) ? [initialLocation, ...init] : init;
+    setSelectedLocations((prev) => {
+      if (prev.length === next.length && prev.every((v, i) => v === next[i])) return prev;
+      return next;
+    });
   }, [initialLocation, initialLocations]);
 
   // ── Location autocomplete ──────────────────────────────────────────
@@ -312,34 +323,15 @@ export default function Location360Client({ initialLocation, initialLocations, e
     setActiveSavedLocation((prev) => (prev && !selectedLocations.includes(prev) ? null : prev));
   }, [selectedLocations]);
 
-  // Load saved-location list for this entity from localStorage (if any).
-  useEffect(() => {
-    if (!entityId) return;
-    try {
-      const raw = localStorage.getItem(`location360.saved.${entityId}`);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setSelectedLocations(parsed as string[]);
-          return;
-        }
-      }
-      // if no saved list, fall back to initialLocations passed from parent
-      if (initialLocations && initialLocations.length > 0) setSelectedLocations(initialLocations);
-    } catch (e) {
-      // ignore
-    }
-  }, [entityId]);
-
-  // Persist saved-location list per-entity
-  useEffect(() => {
-    if (!entityId) return;
-    try {
-      localStorage.setItem(`location360.saved.${entityId}`, JSON.stringify(selectedLocations));
-    } catch (e) {
-      // ignore quota errors
-    }
-  }, [entityId, selectedLocations]);
+  // NOTE: the saved-location *list* (as opposed to the cached risk results
+  // below) is intentionally NOT read from or written to localStorage here.
+  // The parent (entity-analysis.tsx) owns that persistence and is the single
+  // source of truth for it, feeding it down via `initialLocations` and
+  // receiving updates via `onLocationsChange`. This component previously
+  // also read/wrote the exact same `location360.saved.${entityId}` key
+  // independently, which meant two components could each hand the other a
+  // "corrected" version of the list on every render — that cross-talk was
+  // the primary cause of the "Maximum update depth exceeded" crash.
 
   // Notify parent of saved-locations changes, but do it in an effect
   // to avoid updating parent state while the child is rendering.
@@ -871,18 +863,14 @@ export default function Location360Client({ initialLocation, initialLocations, e
               );
             })}
           </div>
-          {/* Selected locations chips */}
-                  {selectedLocations.length > 0 && (
-                    <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {selectedLocations.map((loc) => (
-                        <div key={loc} style={{ padding: '6px 10px', borderRadius: 14, background: '#f3f3f3', display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 13 }}>{loc}</span>
-                          <button onClick={() => removeLocation(loc)} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}>✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
+          {/* NOTE: selected-location chips were previously duplicated here.
+              They're already rendered once in the page header ("Saved-location
+              tabs" block above), with correct dark-theme styling and the same
+              remove action. This second copy used a hardcoded light-grey
+              background (#f3f3f3) left over from before the dark theme was
+              introduced, which is why it showed up as a stray white/grey pill
+              under the tab bar. Removed rather than re-themed, since keeping
+              two renderings of the same list in sync is unnecessary. */}
 
           {/* Panel container */}
           <div style={{
