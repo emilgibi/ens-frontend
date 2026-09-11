@@ -1492,46 +1492,164 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
             mirroring domestic's own structure ══ */}
         {intlActiveTab === 'generic' && (
           <>
-            {/* SECTION 01: RISK OVERVIEW — a Risk Areas / Risk Rating table,
-                same shape as the report doc's "Executive Summary" table
-                (label left, solid-colored rating cell right), not the
-                report-doc's Probe42-only "Financial Score" gauge/radar card
-                domestic shows next to it — Orbis has no equivalent score to
-                plot there, so this is one full-width card. Every active
-                theme rating renders as a row, not a fixed subset. */}
+            {/* SECTION 01: RISK OVERVIEW — mirrors domestic's Financial
+                Score + Key Risk Flags layout, but built entirely from real
+                Orbis KPI data rather than Probe42's financial-ratio score
+                (which Orbis has no equivalent of): a gauge+radar derived
+                from the same theme ratings the old table showed, plus a
+                Key Risk Flags box grid of specific atomic findings
+                (sanctions hits, PEP matches, cyber rating, adverse media
+                count, domain validation, a financial ratio) pulled
+                straight from the per-KPI findings records — no invented
+                numbers. */}
             <SectionHeader n="01" title="RISK OVERVIEW" />
-            <Card title="Key Risk Flags" icon={Shield} accent="rgba(239,68,68,0.4)">
-              {ratingEntries.length === 0 ? (
-                <p style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>No ratings available.</p>
-              ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted-foreground)', padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)' }}>Risk Area</th>
-                      <th style={{ textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted-foreground)', padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)', width: '140px' }}>Risk Rating</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ratingEntries.map(([key, rating]) => {
-                      const color = themeRatingColor(rating as string);
-                      // Solid fill reads clearly against a light "No
-                      // Alerts" gray or a saturated red/green, but yellow
-                      // needs dark text to stay legible — same rule the
-                      // report doc's table uses.
-                      const textColor = color === '#eab308' ? '#111' : '#fff';
-                      return (
-                        <tr key={key}>
-                          <td style={{ fontSize: '12px', color: 'var(--foreground)', padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{toLabel(key)}</td>
-                          <td style={{ padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                            <div style={{ background: color, color: textColor, textAlign: 'center', fontSize: '11px', fontWeight: 700, borderRadius: '6px', padding: '5px 8px' }}>{String(rating)}</div>
-                          </td>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'start' }}>
+              {/* Financial Score — same concept as domestic's card (gauge +
+                  per-axis bars + radar), but built from Orbis's own real
+                  financial ratios (compile_company_financials — the same
+                  data Section 02 charts below), since Orbis has no
+                  pre-computed 1-5 score the way Probe42 does. Each axis's
+                  raw percentage/ratio is shown next to its bar so the
+                  underlying real number is never hidden behind just a
+                  bucketed 1-5 label. */}
+              <Card title="Financial Score" icon={BarChart3} accent="rgba(255,230,0,0.4)">
+                {(() => {
+                  const latestOf = (key: string) => {
+                    const data = financialsMap[key]?.data;
+                    if (!Array.isArray(data) || data.length === 0) return null;
+                    return [...data].sort((a: any, b: any) => (a.closing_date ?? '').localeCompare(b.closing_date ?? '')).slice(-1)[0];
+                  };
+                  const revenueSeries = Array.isArray(financialsMap['operating_revenue']?.data)
+                    ? [...financialsMap['operating_revenue'].data].sort((a: any, b: any) => (a.closing_date ?? '').localeCompare(b.closing_date ?? ''))
+                    : [];
+                  const latestRev = revenueSeries.slice(-1)[0];
+                  const prevRev = revenueSeries.slice(-2)[0];
+                  const growthPct = (latestRev?.raw_value != null && prevRev?.raw_value)
+                    ? ((latestRev.raw_value - prevRev.raw_value) / Math.abs(prevRev.raw_value)) * 100
+                    : null;
+
+                  const profitMargin  = latestOf('profit_margin');
+                  const currentRatio  = latestOf('current_ratio');
+                  const solvencyRatio = latestOf('solvency_ratio');
+                  const roce          = latestOf('roce_before_tax');
+
+                  // Standard finance rule-of-thumb thresholds — the raw
+                  // percentage/ratio shown is always real; only this
+                  // 1-5 bucket is a derived judgment call (Orbis doesn't
+                  // supply a pre-scored equivalent to Probe42's).
+                  const bucketPercent = (v: number) => (v < 0 ? 1 : v < 5 ? 2 : v < 10 ? 3 : v < 20 ? 4 : 5);
+                  const bucketRatio   = (v: number) => (v < 1.0 ? 1 : v < 1.2 ? 2 : v < 1.5 ? 3 : v < 2.0 ? 4 : 5);
+
+                  const axes = [
+                    growthPct != null && { label: 'Growth', score: bucketPercent(growthPct), display: `${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(1)}%` },
+                    profitMargin  && { label: 'Profitability', score: bucketPercent(profitMargin.raw_value), display: profitMargin.display_value },
+                    currentRatio  && { label: 'Liquidity',     score: bucketRatio(currentRatio.raw_value),   display: currentRatio.display_value },
+                    solvencyRatio && { label: 'Solvency',      score: bucketPercent(solvencyRatio.raw_value), display: solvencyRatio.display_value },
+                    roce          && { label: 'Efficiency',    score: bucketPercent(roce.raw_value),          display: roce.display_value },
+                  ].filter(Boolean) as { label: string; score: number; display: string }[];
+
+                  if (axes.length === 0) {
+                    return <p style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>Financial score not available.</p>;
+                  }
+
+                  const overallScore = axes.reduce((sum, a) => sum + a.score, 0) / axes.length;
+                  const roundedScore = Math.round(overallScore * 10) / 10;
+                  const radarData = axes.map((a) => ({ subject: a.label, value: a.score }));
+
+                  return (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
+                        <div style={{ width: '72px', height: '72px', borderRadius: '50%', background: `conic-gradient(${scoreTheme(roundedScore).color} ${(roundedScore / 5) * 360}deg, rgba(255,255,255,0.08) 0deg)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <div style={{ width: '54px', height: '54px', borderRadius: '50%', background: 'var(--card)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                            <span style={{ fontSize: '22px', fontWeight: 800, color: scoreTheme(roundedScore).color, lineHeight: 1 }}>{roundedScore}</span>
+                            <span style={{ fontSize: '9px', color: 'var(--muted-foreground)' }}>out of 5</span>
+                          </div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          {axes.map((a) => (
+                            <ScoreBar key={a.label} label={`${a.label} (${a.display})`} score={a.score} />
+                          ))}
+                        </div>
+                      </div>
+                      <ResponsiveContainer width="100%" height={160}>
+                        <RadarChart data={radarData}>
+                          <PolarGrid stroke="rgba(255,255,255,0.1)" />
+                          <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.5)' }} />
+                          <PolarRadiusAxis domain={[0, 5]} tick={false} axisLine={false} />
+                          <Radar dataKey="value" stroke={ACCENT} fill={ACCENT} fillOpacity={0.15} strokeWidth={2} />
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </>
+                  );
+                })()}
+              </Card>
+
+              {/* Key Risk Flags — the report doc's exact 7 canonical Risk
+                  Areas (Entity Existence, Sanctions, Anti-Bribery and
+                  Anti-Corruption, Government Ownership and Political
+                  Affiliations, Financial Indicators, Other Adverse Media,
+                  Additional Indicators), not the 9 raw theme-rating keys
+                  our backend returns and not atomic per-KPI findings.
+                  Our backend splits Cyber and ESG out as their own theme
+                  ratings, but the doc folds both (plus the generic
+                  "additional_indicator") into one "Additional Indicators"
+                  row — combined here via worst-case severity, not
+                  averaging, so a single High anywhere in that group still
+                  reads as High overall. */}
+              <Card title="Key Risk Flags" icon={Shield} accent="rgba(239,68,68,0.4)">
+                {(() => {
+                  const severityRank = (rating?: string): number => {
+                    const r = (rating ?? '').toLowerCase();
+                    if (r.includes('high')) return 3;
+                    if (r.includes('medium')) return 2;
+                    if (r.includes('low')) return 1;
+                    return 0; // No Alerts / unknown
+                  };
+                  const worstOf = (...vals: (string | undefined)[]): string | undefined => {
+                    const present = vals.filter((v): v is string => v != null);
+                    if (present.length === 0) return undefined;
+                    return present.reduce((worst, v) => (severityRank(v) > severityRank(worst) ? v : worst));
+                  };
+                  const riskAreas: { label: string; rating?: string }[] = [
+                    { label: 'Entity Existence', rating: ratings.entity_existence },
+                    { label: 'Sanctions', rating: ratings.sanctions },
+                    { label: 'Anti-Bribery and Anti-Corruption', rating: ratings.bribery_corruption_overall },
+                    { label: 'Government Ownership and Political Affiliations', rating: ratings.government_political },
+                    { label: 'Financial Indicators', rating: ratings.financials },
+                    { label: 'Other Adverse Media', rating: ratings.other_adverse_media },
+                    { label: 'Additional Indicators', rating: worstOf(ratings.additional_indicator, ratings.cyber, ratings.esg) },
+                  ].filter((row) => row.rating != null);
+
+                  if (riskAreas.length === 0) {
+                    return <p style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>No ratings available.</p>;
+                  }
+                  return (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted-foreground)', padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)' }}>Risk Area</th>
+                          <th style={{ textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted-foreground)', padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)', width: '120px' }}>Risk Rating</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </Card>
+                      </thead>
+                      <tbody>
+                        {riskAreas.map(({ label, rating }) => {
+                          const color = themeRatingColor(rating);
+                          const textColor = color === '#eab308' ? '#111' : '#fff';
+                          return (
+                            <tr key={label}>
+                              <td style={{ fontSize: '12px', color: 'var(--foreground)', padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{label}</td>
+                              <td style={{ padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                                <div style={{ background: color, color: textColor, textAlign: 'center', fontSize: '11px', fontWeight: 700, borderRadius: '6px', padding: '5px 8px' }}>{String(rating)}</div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  );
+                })()}
+              </Card>
+            </div>
 
             {/* SECTION 02: FINANCIAL PERFORMANCE — one combined multi-line
                 chart per category (was one small single-line chart per
@@ -1750,18 +1868,22 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
                             <Loader2 size={14} className="animate-spin" />Loading images…
                           </div>
                         ) : (
-                          // Fixed-width thumbnail tiles, not columns that
-                          // stretch to fill the card — with only 1-2 images,
-                          // `repeat(N, 1fr)` used to blow each one up to a
-                          // wide, oversized banner instead of a thumbnail.
-                          // A single image is centered in the card; two or
-                          // more lay out left-to-right as normal.
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px', justifyContent: intlImages.length === 1 ? 'center' : 'start' }}>
-                            {intlImages.map((img, i) => (
-                              <img key={i} src={`data:${img.content_type ?? 'image/jpeg'};base64,${img.data}`} alt={img.filename}
-                                style={{ width: '140px', height: '140px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border)' }} />
-                            ))}
-                          </div>
+                          // A single image fills the full card width as a
+                          // banner; two or more lay out as fixed-width
+                          // thumbnail tiles instead of stretching (with
+                          // only 1-2 images, `repeat(N, 1fr)` used to blow
+                          // each one up to a wide, oversized banner).
+                          intlImages.length === 1 ? (
+                            <img src={`data:${intlImages[0].content_type ?? 'image/jpeg'};base64,${intlImages[0].data}`} alt={intlImages[0].filename}
+                              style={{ width: '100%', height: '360px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border)', display: 'block' }} />
+                          ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px' }}>
+                              {intlImages.map((img, i) => (
+                                <img key={i} src={`data:${img.content_type ?? 'image/jpeg'};base64,${img.data}`} alt={img.filename}
+                                  style={{ width: '140px', height: '140px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border)' }} />
+                              ))}
+                            </div>
+                          )
                         )}
                       </Card>
                     </div>
@@ -2330,11 +2452,25 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
                         <Loader2 size={14} className="animate-spin" style={{ color: ACCENT }} />
                         Loading entity images…
                       </div>
+                  ) : entityImages.length === 1 ? (
+                      // A single image fills the full card width as a banner.
+                      <div>
+                        <img
+                            src={`data:image/jpeg;base64,${entityImages[0].data}`}
+                            alt={entityImages[0].filename}
+                            style={{ width: '100%', height: '360px', borderRadius: '8px', display: 'block', objectFit: 'cover', marginBottom: '6px' }}
+                        />
+                        <div style={{
+                          fontSize: '10px', color: 'var(--muted-foreground)',
+                          fontFamily: 'monospace', textAlign: 'center',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                        }}>
+                          {entityImages[0].filename}
+                        </div>
+                      </div>
                   ) : entityImages.length > 0 ? (
-                      // Fixed-width thumbnail tiles regardless of count —
-                      // a single image is centered in the card; two or
-                      // more lay out left-to-right as normal.
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px', justifyContent: entityImages.length === 1 ? 'center' : 'start' }}>
+                      // Two or more lay out as fixed-width thumbnail tiles.
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px' }}>
                         {entityImages.map((img, idx) => (
                           <div key={idx}>
                             <img
