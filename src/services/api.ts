@@ -168,10 +168,33 @@ export const apiService = {
     return response.data;
   },
 
-  async getEntityImage(googleImageName: string) {
+  async getEntityFinancials(ensId: string, screeningType: ScreeningType = 'domestic') {
+    const { SUBMODAL_FINANCIALS } = getScreeningEndpoints(screeningType);
+    const response = await apiClient.post(
+        SUBMODAL_FINANCIALS,
+        { ens_id: ensId },
+    );
+    return response.data;
+  },
+
+  async getEntityImage(googleImageName: string, screeningType: ScreeningType = 'domestic') {
+    const { GET_IMAGE } = getScreeningEndpoints(screeningType);
     const response = await apiClient.get(
-        API_ENDPOINTS.BACKEND.GET_IMAGE,
+        GET_IMAGE,
         { params: { google_image_name: googleImageName } },
+    );
+    return response.data;
+  },
+
+  // International only — domestic's AI brief goes through a separate
+  // /api/vendor-risk/ai-brief proxy route instead (see entity-analysis.tsx's
+  // generateBrief), since that lives on the orchestration service rather
+  // than this BACKEND.
+  async getEntityAiBrief(ensId: string) {
+    const { SUBMODAL_AI_BRIEF } = getScreeningEndpoints('international');
+    const response = await apiClient.post(
+        SUBMODAL_AI_BRIEF,
+        { ens_id: ensId },
     );
     return response.data;
   },
