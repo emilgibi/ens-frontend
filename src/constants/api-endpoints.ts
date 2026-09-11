@@ -161,5 +161,19 @@ export const getScreeningEndpoints = (screeningType: ScreeningType) => {
         screeningType === 'domestic'
             ? `${BACKEND}/universe/get-submodal-findings`
             : `${BACKEND}/graph/get-submodal-findings`,
+    // Both backends expose this one under /graph/* (no /universe/* variant
+    // for domestic — unlike PROFILE/FINDINGS above), same
+    // compile_company_financials() function shape on both sides.
+    SUBMODAL_FINANCIALS: `${BACKEND}/graph/get-submodal-financials`,
+    // /report/get-images is at the same path on both backends (Orbis's
+    // version ported directly from Probe42's — see
+    // coe-ens-application-backend-orbis/app/core/supplier/report.py).
+    GET_IMAGE: `${BACKEND}/report/get-images`,
+    // International-only: domestic's AI brief still goes through the
+    // orchestration service via the existing /api/vendor-risk/ai-brief
+    // proxy route (that's where Probe42's raw record + condensation live).
+    // Orbis's new generate_orbis_ai_brief() lives on this BACKEND directly,
+    // alongside SUBMODAL_FINANCIALS above.
+    SUBMODAL_AI_BRIEF: `${BACKEND}/graph/get-submodal-ai-brief`,
   }
 }

@@ -50,9 +50,21 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(data, { status: 200 });
   } catch (err: any) {
+    // A closed/unreachable orchestration service surfaces here as a plain
+    // fetch failure (Node's undici throws "fetch failed" with the real
+    // reason on `.cause`), which used to reach the browser as an opaque
+    // "Internal server error" — no indication that nothing was even
+    // listening. Surface the actual cause and which URL was attempted.
+    const causeCode = err?.cause?.code ?? err?.code;
+    const isConnFailure = causeCode === 'ECONNREFUSED' || causeCode === 'ENOTFOUND' || causeCode === 'ETIMEDOUT' || err?.message === 'fetch failed';
+    const orchestrationBase = process.env.SERVER_APPLICATION_ORCHESTRATION || process.env.NEXT_PUBLIC_APPLICATION_ORCHESTRATION;
     return NextResponse.json(
-      { error: err?.message ?? 'Internal server error' },
-      { status: 500 },
+      {
+        error: isConnFailure
+          ? `Cannot reach the orchestration service at ${orchestrationBase ?? '(URL not configured)'}${causeCode ? ` (${causeCode})` : ''} — is ens-orchestration-probe42 running?`
+          : (err?.message ?? 'Internal server error'),
+      },
+      { status: isConnFailure ? 503 : 500 },
     );
   }
 }

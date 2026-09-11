@@ -6,6 +6,7 @@ import {
   Building2, Shield, TrendingUp, FileText,
   CheckCircle2, AlertTriangle, XCircle,
   BarChart3, CreditCard, Banknote, Activity, Globe, Scale,
+  Users, Landmark, Newspaper,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { getApiUrl } from '@/lib/utils';
 import { apiService } from '@/services/api';
 import Location360Client from '@/components/location360/Location360Client';
+import { DownloadDropdown } from '@/components/shared/download-button';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type SelectedEntity = {
@@ -38,10 +40,43 @@ const fmtCr = (v?: number | null) => {
 };
 const fmtPct = (v?: number | null, d = 1) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(d)}%`;
+// Compact axis-tick formatter for large raw USD values (e.g. 317180000000)
+// — plotting the raw number with no formatter is what produced the
+// garbled, clipped-looking Y-axis labels on the international financial
+// charts (recharts' default axis width isn't wide enough for a 12-digit
+// number, so the leading digits get cut off).
+// Entity location image blobs occasionally include duplicate uploads under
+// the same google_image_name prefix — dedupe by the actual image bytes
+// (not filename, which can differ for identical content) so the grid never
+// shows the same photo twice.
+const dedupeImages = <T extends { data: string }>(images: T[]): T[] => {
+  const seen = new Set<string>();
+  return images.filter((img) => {
+    if (seen.has(img.data)) return false;
+    seen.add(img.data);
+    return true;
+  });
+};
+const fmtCompactUSD = (v: number) => {
+  const sign = v < 0 ? '-' : '';
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(1)}K`;
+  return `${sign}$${abs.toFixed(0)}`;
+};
 const fmtDate = (d?: string | null) => {
   if (!d) return '—';
-  try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
-  catch { return d; }
+  const s = String(d).trim();
+  // Orbis (international) dates arrive as DD/MM/YYYY or DD-MM-YYYY, which
+  // JS's native Date parser misreads as MM/DD/YYYY — "31/07/1947" silently
+  // becomes an Invalid Date instead of throwing, so it can't be caught with
+  // try/catch. Parse that shape explicitly; ISO strings (domestic) fall
+  // through to the native parser unchanged.
+  const dmy = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  const date = dmy ? new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1])) : new Date(s);
+  if (isNaN(date.getTime())) return s;
+  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 const initials = (n: string) =>
   n.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
@@ -268,8 +303,58 @@ function BriefOutput({ text }: { text: string }) {
   return <div>{els}</div>;
 }
 
+// ─── Search mode toggle (Domestic / International) ────────────────────────────
+// "Both" removed from the toggle per request — searchMode's type and the
+// 'both' branches in handleNameInput/SourceTag are left as-is (harmless,
+// just unreachable via the UI) rather than ripping out a third state that
+// still exists in the type everywhere else.
+const SEARCH_MODES = [
+  { key: 'domestic',      label: 'Domestic' },
+  { key: 'international', label: 'International' },
+] as const;
+
+function SearchModeToggle({ mode, onChange }: { mode: 'domestic' | 'international' | 'both'; onChange: (m: 'domestic' | 'international' | 'both') => void }) {
+  return (
+    <div style={{ display: 'inline-flex', gap: '2px', padding: '2px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+      {SEARCH_MODES.map(({ key, label }) => {
+        const active = mode === key;
+        return (
+          <button key={key} onClick={() => onChange(key)}
+            style={{
+              padding: '4px 12px', fontSize: '11px', fontWeight: active ? 700 : 500,
+              borderRadius: '6px', border: 'none', cursor: 'pointer',
+              background: active ? ACCENT : 'transparent',
+              color: active ? '#1a1a1a' : 'var(--muted-foreground)',
+              transition: 'all 0.12s ease',
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Small DOM/INT tag shown per suggestion row once a search can return either.
+function SourceTag({ source }: { source?: 'domestic' | 'international' }) {
+  if (!source) return null;
+  const isIntl = source === 'international';
+  return (
+    <span style={{
+      fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em',
+      color: isIntl ? '#93c5fd' : '#86efac',
+      background: isIntl ? 'rgba(147,197,253,0.12)' : 'rgba(134,239,172,0.12)',
+      border: `1px solid ${isIntl ? 'rgba(147,197,253,0.3)' : 'rgba(134,239,172,0.3)'}`,
+      padding: '1px 6px', borderRadius: '4px', flexShrink: 0,
+    }}>
+      {isIntl ? 'INT' : 'DOM'}
+    </span>
+  );
+}
+
 // ─── Search bar ───────────────────────────────────────────────────────────────
-function SearchBar({ nameQuery, handleNameInput, sugLoading, suggestions, showDrop, pickSuggestion, inputRef, dropRef }: {
+function SearchBar({ nameQuery, handleNameInput, sugLoading, suggestions, showDrop, pickSuggestion, inputRef, dropRef, searchMode, onSearchModeChange }: {
   nameQuery: string;
   handleNameInput: (v: string) => void;
   sugLoading: boolean;
@@ -278,12 +363,18 @@ function SearchBar({ nameQuery, handleNameInput, sugLoading, suggestions, showDr
   pickSuggestion: (s: any) => void;
   inputRef: RefObject<HTMLDivElement | null>;
   dropRef: RefObject<HTMLDivElement | null>;
+  searchMode: 'domestic' | 'international' | 'both';
+  onSearchModeChange: (m: 'domestic' | 'international' | 'both') => void;
 }) {
+  const showSourceTags = searchMode === 'both';
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px 20px', marginBottom: '8px', position: 'relative' }}>
-      <label style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--muted-foreground)', display: 'block', marginBottom: '8px' }}>
-        Company Name
-      </label>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+        <label style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--muted-foreground)' }}>
+          Company Name
+        </label>
+        <SearchModeToggle mode={searchMode} onChange={onSearchModeChange} />
+      </div>
       <div ref={inputRef} style={{ position: 'relative' }}>
         <Search size={13} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-foreground)', pointerEvents: 'none' }} />
         <Input
@@ -308,10 +399,16 @@ function SearchBar({ nameQuery, handleNameInput, sugLoading, suggestions, showDr
                 onMouseOver={e => (e.currentTarget.style.background = 'rgba(255,230,0,0.06)')}
                 onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
               >
-                <div style={{ fontSize: '13px', color: 'var(--foreground)', fontWeight: 500, marginBottom: '4px' }}>{s.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                  {showSourceTags && <SourceTag source={s.source} />}
+                  <div style={{ fontSize: '13px', color: 'var(--foreground)', fontWeight: 500 }}>{s.name}</div>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {(s.cin ?? s.llpin ?? s.identifier) && (
                     <span style={{ fontSize: '11px', color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>{s.cin ?? s.llpin ?? s.identifier}</span>
+                  )}
+                  {s.country && (
+                    <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>{s.country}</span>
                   )}
                   {(s.entity_type ?? (s.cin ? 'Company' : s.llpin ? 'LLP' : null)) && (
                     <span style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: s.llpin ? '#f59e0b' : '#6ee7b7', background: s.llpin ? 'rgba(245,158,11,0.1)' : 'rgba(110,231,183,0.1)', padding: '1px 6px', borderRadius: '4px' }}>
@@ -362,9 +459,42 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
   const dropRef  = useRef<HTMLDivElement | null>(null);
   const debRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ─── Domestic / International / Both search toggle ─────────────────────────
+  const [searchMode, setSearchMode] = useState<'domestic' | 'international' | 'both'>('domestic');
+  // Which pipeline the currently-displayed report came from — drives which
+  // report layout renders below (Probe42's bespoke report vs the Orbis
+  // theme-based one). Kept separate from searchMode so switching the toggle
+  // doesn't blank out an already-open report.
+  const [reportSource, setReportSource] = useState<'domestic' | 'international'>('domestic');
+  // International report state — kept separate from reportData/ensFindings
+  // (which are Probe42-shaped) since Orbis's schema is genuinely different
+  // (see compile_company_findings: profile + 6 theme-based ratings/findings,
+  // confirmed against coe-ens-application-backend-orbis/app/core/supplier/graph.py).
+  const [intlLoading, setIntlLoading]     = useState(false);
+  const [intlError, setIntlError]         = useState<string | null>(null);
+  const [intlDisplayName, setIntlDisplayName] = useState<string | null>(null);
+  const [intlSearchResult, setIntlSearchResult] = useState<any>(null); // raw suggestion picked (name/country/address/bvdId)
+  const [intlEnsId, setIntlEnsId]         = useState<string | null>(null);
+  const [intlSessionId, setIntlSessionId] = useState<string | null>(null);
+  const [intlProfile, setIntlProfile]     = useState<any>(null);
+  const [intlFindings, setIntlFindings]   = useState<any>(null);
+  const [intlNotScreened, setIntlNotScreened] = useState(false);
+  const [intlFinancials, setIntlFinancials] = useState<any>(null);
+  const [intlImages, setIntlImages] = useState<Array<{ filename: string; data: string; content_type?: string }>>([]);
+  const [intlImagesLoading, setIntlImagesLoading] = useState(false);
+  const [intlBriefText, setIntlBriefText] = useState('');
+  const [intlBriefLoading, setIntlBriefLoading] = useState(false);
+  // Only 2 tabs for international (no Procurement/SCM — nothing in that
+  // domain ports from Probe42's GST/MSME/CIRP concepts; can be added later
+  // if needed). 'generic' mirrors domestic's Generic Profiling tab —
+  // everything stacked in one tab, matching domestic's own structure.
+  const [intlActiveTab, setIntlActiveTab] = useState<'generic' | 'location360'>('generic');
+  const [intlSavedLocations, setIntlSavedLocations] = useState<string[]>([]);
+
   // Auto-search when entity clicked from Overview table
   useEffect(() => {
     if (selectedEntity?.identifier) {
+      setReportSource('domestic');
       setDisplayName(selectedEntity.name);
       setNameQuery('');
       setSuggestions([]);
@@ -391,6 +521,12 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Fetches whichever pipeline(s) searchMode calls for, tags each result
+  // with its source so pickSuggestion knows which report to load, and
+  // merges them for "both" mode. A failed/empty call on either side just
+  // contributes zero results — no error shown, matching how a plain
+  // no-match already looks (same reasoning as the international name
+  // search endpoint's cache-miss-then-dead-live-API path).
   const handleNameInput = (v: string) => {
     setNameQuery(v);
     setShowDrop(true);
@@ -400,9 +536,26 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
     debRef.current = setTimeout(async () => {
       setSugLoading(true);
       try {
-        const r = await fetch(getApiUrl(`/api/probe42-name-search?orgName=${encodeURIComponent(v.trim())}`));
-        const j = await r.json();
-        setSuggestions((j?.data?.results ?? j?.results ?? []).slice(0, 10));
+        const q = encodeURIComponent(v.trim());
+        const wantDomestic = searchMode === 'domestic' || searchMode === 'both';
+        const wantIntl     = searchMode === 'international' || searchMode === 'both';
+
+        const [domesticResults, intlResults] = await Promise.all([
+          wantDomestic
+            ? fetch(getApiUrl(`/api/probe42-name-search?orgName=${q}`))
+                .then(r => r.json())
+                .then(j => (j?.data?.results ?? j?.results ?? []).map((s: any) => ({ ...s, source: 'domestic' as const })))
+                .catch(() => [])
+            : Promise.resolve([]),
+          wantIntl
+            ? fetch(getApiUrl(`/api/moodys-name-search?orgName=${q}`))
+                .then(r => r.json())
+                .then(j => (j?.data?.results ?? j?.results ?? []).map((s: any) => ({ ...s, source: 'international' as const })))
+                .catch(() => [])
+            : Promise.resolve([]),
+        ]);
+
+        setSuggestions([...domesticResults, ...intlResults].slice(0, 10));
         setShowDrop(true);
       } catch { setSuggestions([]); }
       finally { setSugLoading(false); }
@@ -412,12 +565,137 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
   const pickSuggestion = (s: any) => {
     setShowDrop(false);
     setSuggestions([]);
+    setNameQuery('');
+    if (s.source === 'international') {
+      setReportSource('international');
+      fetchInternationalCompany(s);
+      return;
+    }
+    setReportSource('domestic');
     const id = s.cin ?? s.llpin ?? s.identifier ?? nameQuery.trim();
     const it = s.identifier_type ?? (s.cin ? 'cin' : s.llpin ? 'llpin' : 'cin');
     setDisplayName(s.name);
-    setNameQuery('');
     fetchCompany(id, it, s.entity_type ?? 'company');
   };
+
+  /**
+   * International counterpart of fetchCompany. Unlike Probe42, there's no
+   * ad-hoc "pull everything on this company" endpoint — Orbis's report data
+   * (compile_company_profile/findings, six theme-based ratings — see
+   * coe-ens-application-backend-orbis/app/core/supplier/graph.py) only
+   * exists for entities that have actually been screened (have an ens_id).
+   * So: look up whether this bvd_id has been screened; if yes, load the
+   * full theme-based report; if no, fall back to showing the raw
+   * cache/live search result fields as a clearly-labeled "not yet
+   * screened" reference card instead of a fake/empty report.
+   */
+  const fetchInternationalCompany = async (s: any) => {
+    setIntlLoading(true);
+    setIntlError(null);
+    setIntlDisplayName(s.name ?? null);
+    setIntlSearchResult(s);
+    setIntlEnsId(null);
+    setIntlSessionId(null);
+    setIntlProfile(null);
+    setIntlFindings(null);
+    setIntlFinancials(null);
+    setIntlImages([]);
+    setIntlImagesLoading(false);
+    setIntlBriefText('');
+    setIntlBriefLoading(false);
+    setIntlNotScreened(false);
+    setIntlActiveTab('generic');
+
+    const bvdId = s.identifier;
+    if (!bvdId) {
+      setIntlError('No BVD ID available for this result.');
+      setIntlLoading(false);
+      return;
+    }
+
+    try {
+      const lookupRes = await fetch(getApiUrl(`/api/moodys-entity-lookup?bvdId=${encodeURIComponent(bvdId)}`));
+      const lookup = await lookupRes.json();
+
+      if (!lookup?.found) {
+        setIntlNotScreened(true);
+        setIntlLoading(false);
+        return;
+      }
+
+      setIntlEnsId(lookup.ensId);
+      setIntlSessionId(lookup.sessionId);
+
+      const [profile, findings, financials] = await Promise.all([
+        apiService.getEntityProfile(lookup.ensId, 'international').catch(() => null),
+        apiService.getEntityFindings(lookup.ensId, 'international').catch(() => null),
+        apiService.getEntityFinancials(lookup.ensId, 'international').catch(() => null),
+      ]);
+      setIntlProfile(profile);
+      setIntlFindings(findings);
+      setIntlFinancials(financials);
+
+      // Location photos — mirrors domestic's fetchSubmodal image-fetch step.
+      // findings.google_image_name only exists after the graph.py fix
+      // (compile_company_findings now includes it, same as Probe42's
+      // universe.py already did).
+      if (findings?.google_image_name) {
+        setIntlImagesLoading(true);
+        try {
+          const imageData = await apiService.getEntityImage(findings.google_image_name, 'international');
+          let allImages: Array<{ filename: string; data: string; content_type?: string }> = [];
+          if (Array.isArray(imageData)) {
+            allImages = imageData.filter((img: any) => img?.data);
+          } else if (imageData?.images && Array.isArray(imageData.images)) {
+            allImages = imageData.images.filter((img: any) => img?.data);
+          }
+          setIntlImages(dedupeImages(allImages));
+        } catch {
+          setIntlImages([]);
+        } finally {
+          setIntlImagesLoading(false);
+        }
+      }
+    } catch (e: any) {
+      setIntlError(e?.message ?? 'Failed to load international entity data.');
+    } finally {
+      setIntlLoading(false);
+    }
+  };
+
+  // International counterpart of generateBrief — calls
+  // generate_orbis_ai_brief() on coe-ens-application-backend-orbis directly
+  // (no proxy route needed, unlike domestic's /api/vendor-risk/ai-brief,
+  // since that endpoint already lives on the same BACKEND getEntityFindings/
+  // getEntityFinancials call).
+  const generateIntlBrief = async () => {
+    if (!intlEnsId) return;
+    setIntlBriefLoading(true);
+    setIntlBriefText('');
+    try {
+      const data = await apiService.getEntityAiBrief(intlEnsId);
+      setIntlBriefText(data?.brief ?? 'No brief generated.');
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail ?? e?.message ?? 'AI brief request failed';
+      setIntlBriefText(`Error: ${detail}`);
+    } finally {
+      setIntlBriefLoading(false);
+    }
+  };
+
+  // Per-bvdId saved locations for the international Location Risk tab —
+  // mirrors the domestic savedLocations effect below, keyed separately.
+  useEffect(() => {
+    const bvdId = intlSearchResult?.identifier;
+    if (!bvdId) return;
+    try {
+      const raw = localStorage.getItem(`location360.saved.intl.${bvdId}`);
+      const arr = raw ? JSON.parse(raw) : [];
+      setIntlSavedLocations(Array.isArray(arr) ? arr : []);
+    } catch {
+      setIntlSavedLocations([]);
+    }
+  }, [intlSearchResult]);
 
   const fetchCompany = async (identifier: string, identifierType: string, entityType: string) => {
     setIsLoading(true);
@@ -576,7 +854,7 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
             }
             
             if (allImages.length > 0) {
-              setEntityImages(allImages);
+              setEntityImages(dedupeImages(allImages));
               console.log('[EntityAnalysis] ✅ All', allImages.length, 'entity images loaded');
             } else {
               console.warn('[EntityAnalysis] ⚠ No valid images found in response');
@@ -746,6 +1024,808 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
     APPROVED: '#ca8a04', PREFERRED: '#16a34a', STRATEGIC: '#2563eb',
   };
 
+  // ─── International report (Orbis) ───────────────────────────────────────────
+  // Genuinely separate render path from the Probe42 report below — Orbis's
+  // schema is theme-based (six fixed themes: sanctions, government_political,
+  // bribery_corruption_overall, financials, other_adverse_media,
+  // additional_indicator; each with a rating + a list of KPI findings),
+  // confirmed against coe-ens-application-backend-orbis/app/core/supplier/
+  // graph.py's compile_company_findings(). None of Probe42's GST/MSME/CIRP/
+  // procurement-tier logic applies here, so this doesn't try to reuse it.
+  if (reportSource === 'international') {
+    const searchBarEl = (
+      <SearchBar nameQuery={nameQuery} handleNameInput={handleNameInput} sugLoading={sugLoading} suggestions={suggestions} showDrop={showDrop} pickSuggestion={pickSuggestion} inputRef={inputRef} dropRef={dropRef} searchMode={searchMode} onSearchModeChange={setSearchMode} />
+    );
+
+    if (!intlSearchResult && !intlLoading) {
+      return (
+        <div style={{ maxWidth: '860px' }}>
+          <div style={{ textAlign: 'center', paddingTop: '24px', marginBottom: '32px' }}>
+            <div style={{ width: '60px', height: '60px', borderRadius: '14px', margin: '0 auto 18px', background: 'rgba(255,230,0,0.1)', border: '1px solid rgba(255,230,0,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Search size={24} style={{ color: ACCENT }} />
+            </div>
+            <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--foreground)', marginBottom: '8px', fontFamily: 'Georgia, serif' }}>Entity Analysis</h2>
+            <p style={{ fontSize: '13px', color: 'var(--muted-foreground)', lineHeight: 1.65, maxWidth: '420px', margin: '0 auto' }}>
+              Search any international company for sanctions, ownership, ESG, and adverse-media findings.
+            </p>
+          </div>
+          {searchBarEl}
+        </div>
+      );
+    }
+
+    if (intlLoading) {
+      return (
+        <div style={{ maxWidth: '860px' }}>
+          {searchBarEl}
+          <div style={{ textAlign: 'center', padding: '64px 0' }}>
+            <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 12px', display: 'block', color: ACCENT }} />
+            <p style={{ fontSize: '13px', color: 'var(--muted-foreground)' }}>Fetching intelligence for <strong style={{ color: 'var(--foreground)' }}>{intlDisplayName}</strong>…</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (intlError) {
+      return (
+        <div style={{ maxWidth: '860px' }}>
+          {searchBarEl}
+          <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', padding: '14px 18px', color: '#ef4444', fontSize: '13px', marginTop: '16px' }}>{intlError}</div>
+        </div>
+      );
+    }
+
+    if (intlNotScreened) {
+      const s = intlSearchResult ?? {};
+      return (
+        <div style={{ maxWidth: '860px' }}>
+          {searchBarEl}
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px 24px', marginTop: '16px', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: '#93c5fd' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--foreground)' }}>{s.name ?? intlDisplayName}</h2>
+              <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', color: '#93c5fd', background: 'rgba(147,197,253,0.12)', border: '1px solid rgba(147,197,253,0.3)', padding: '2px 8px', borderRadius: '4px' }}>
+                Not Yet Screened
+              </span>
+            </div>
+            <p style={{ fontSize: '12px', color: 'var(--muted-foreground)', lineHeight: 1.6, marginBottom: '16px' }}>
+              This company hasn't been through a screening run yet, so no rated findings exist for it.
+              Showing the cached reference data on file instead — run it through the screening
+              pipeline for a full risk report.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '12px' }}>
+              <div><span style={{ color: 'var(--muted-foreground)' }}>BVD ID</span><div style={{ fontFamily: 'monospace', color: 'var(--foreground)' }}>{s.identifier ?? '—'}</div></div>
+              <div><span style={{ color: 'var(--muted-foreground)' }}>Country</span><div style={{ color: 'var(--foreground)' }}>{s.country ?? '—'}</div></div>
+              <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--muted-foreground)' }}>Address</span><div style={{ color: 'var(--foreground)' }}>{s.address ?? '—'}</div></div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Full report — genuinely schema-driven, not hardcoded ──
+    // profile: whatever fields the API returned (company_profile table,
+    // minus internal linkage columns). ratings: whatever kpi_codes are
+    // active for this entity in ovar (server already excludes
+    // "Deactivated" ones) — 'supplier' is the overall/headline rating,
+    // everything else is a theme rating. findings: whatever theme keys
+    // pull_kpis() grouped this entity's flagged KPIs into. financials:
+    // whatever metrics compile_company_financials() found non-empty for
+    // this entity (verified against real data: often only 2 of 13
+    // possible metrics are populated). None of these are hardcoded lists
+    // — a company with a different set of active ratings, theme keys, or
+    // populated financial metrics renders correctly with no code change.
+    const profile = intlProfile?.profile ?? {};
+    const ratings = intlFindings?.ratings ?? intlProfile?.ratings ?? {};
+    const findings = intlFindings?.findings ?? {};
+    const financialsMap = intlFinancials?.financials ?? {};
+    const overallRating = ratings?.supplier;
+    const themeRatingColor = (rating?: string) => {
+      const r = (rating ?? '').toLowerCase();
+      if (r.includes('high')) return '#ef4444';
+      if (r.includes('medium')) return '#eab308';
+      // "No Alerts" is a neutral "nothing flagged" status, not the same
+      // affirmative signal as a verified "Low" rating — the report doc's
+      // own Executive Summary table draws it gray, not green, so this
+      // matches that instead of conflating the two.
+      if (r.includes('no alert')) return '#6b7280';
+      if (r.includes('low')) return '#22c55e';
+      return '#6b7280';
+    };
+    const toLabel = (key: string) => key.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+    // Source-text polish only (never touches underlying data): fixes the
+    // "PeP" casing typo and the dangling "- )" / "- :" left behind when a
+    // role/detail field the backend returned was blank.
+    const cleanFindingText = (s: string) => s
+      .replace(/\bPeP\b/g, 'PEP')
+      .replace(/-\s*\)/g, ')')
+      .replace(/-\s*:/g, ':');
+    // Icon per theme, matched by keyword against whatever theme key the API
+    // returns — not a lookup table keyed to specific expected theme names,
+    // so an unrecognized future theme still gets a sensible icon (FileText)
+    // instead of breaking.
+    const themeIcon = (key: string) => {
+      const k = key.toLowerCase();
+      if (k.includes('sanction')) return Shield;
+      if (k.includes('government') || k.includes('political') || k.includes('bribery') || k.includes('corruption')) return Landmark;
+      if (k.includes('financial')) return Banknote;
+      if (k.includes('adverse') || k.includes('media') || k.includes('news')) return Newspaper;
+      if (k.includes('cyber') || k.includes('additional') || k.includes('indicator')) return Activity;
+      if (k.includes('entity') || k.includes('existence')) return Building2;
+      return FileText;
+    };
+
+    // 'name' and 'address' get dedicated prominent placement in the header;
+    // key_executives/shareholders get their own Board & Ownership section
+    // (multi-line text reads badly crammed into a 2-column field grid).
+    const PROFILE_HIDDEN_KEYS = new Set([
+      'ens_id', 'session_id', 'create_time', 'update_time', 'id',
+      // Shown directly in the header instead (name/title, quick-fact row,
+      // address line, or the status/revenue/employee/website pill row).
+      'name', 'address', 'national_identifier', 'incorporation_date', 'legal_status',
+      'active_status', 'revenue', 'employee', 'website',
+      // Board & Ownership gets these two in their own dedicated section.
+      'key_executives', 'shareholders',
+    ]);
+    const profileEntries = Object.entries(profile).filter(
+      ([k, v]) => !PROFILE_HIDDEN_KEYS.has(k) && v != null && v !== '',
+    );
+    const ratingEntries = Object.entries(ratings).filter(([k]) => k !== 'supplier');
+    const findingsThemeKeys = Object.keys(findings);
+
+    // Group financial metrics by whatever "category" the backend assigned
+    // (e.g. "PROFIT & LOSS ACCOUNT", "STRUCTURE RATIOS") — categories and
+    // which metrics exist within them both come from the API response,
+    // nothing fixed locally. compile_company_financials() always returns
+    // all 13 possible metric keys, with data: [] for ones that have no
+    // actual values (confirmed against real data) — those are dropped
+    // here rather than rendered as empty "—" cards, since showing a card
+    // for a metric that has literally zero data points isn't useful, it's
+    // just clutter (this is a display filter on real absence of data, not
+    // an assumption about which metrics matter).
+    const financialsByCategory: Record<string, any[]> = {};
+    Object.entries(financialsMap).forEach(([metricKey, metric]: [string, any]) => {
+      if (!Array.isArray(metric?.data) || metric.data.length === 0) return;
+      const cat = metric?.category ?? 'OTHER';
+      (financialsByCategory[cat] ??= []).push({ key: metricKey, ...metric });
+    });
+    const financialCategories = Object.keys(financialsByCategory);
+
+    // Generic kpi_details renderer — detects shape at runtime instead of
+    // hardcoding per-theme/per-KPI-code assumptions (verified real
+    // examples vary: a plain sentence for SAN3A, a JSON array of
+    // {factor, value} pairs for CYB1A, a pre-formatted multi-line string
+    // for FIN1A). Any KPI whose kpi_details happens to be a factor/value
+    // array gets the table treatment, regardless of which theme it's in.
+    // All patterns below are detected by SHAPE (regex/structure), not by
+    // theme name or kpi_code — so any KPI whose kpi_details happens to
+    // match, in any theme, gets the nicer treatment automatically.
+    const renderKpiDetails = (details: any) => {
+      let parsed: any = details;
+      if (typeof details === 'string') {
+        try { parsed = JSON.parse(details); } catch { parsed = details; }
+      }
+
+      // Factor/value array (confirmed real shapes: CYB1A uses lowercase
+      // "factor"/"value" keys, DOM1A-style entity-existence KPIs use
+      // capitalized "Factor"/"Value" — normalize casing so both render as
+      // the colored grid instead of one of them falling through to a raw
+      // JSON dump) — colored grid, not a plain table, with semantic
+      // coloring for common threat-flag vocabulary (YES/NO/PASS/FAIL/etc.),
+      // falling back to plain color when the value doesn't match.
+      const asFactorValue = (p: any) => {
+        if (!p || typeof p !== 'object') return null;
+        const factor = p.factor ?? p.Factor ?? p.Parameter ?? p.parameter;
+        const value = p.value ?? p.Value;
+        return factor != null && value != null ? { factor, value } : null;
+      };
+      const factorValueRows = Array.isArray(parsed) ? parsed.map(asFactorValue) : null;
+      if (factorValueRows && factorValueRows.length > 0 && factorValueRows.every(Boolean)) {
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px' }}>
+            {factorValueRows.map((p, i) => {
+              const v = String(p!.value ?? '').trim().toUpperCase();
+              const isNegative = ['YES', 'FAIL', 'HIGH', 'ACTIVE', 'TRUE'].includes(v);
+              const isPositive = ['NO', 'PASS', 'CLEAR', 'LOW', 'FALSE'].includes(v);
+              const color = isNegative ? '#ef4444' : isPositive ? '#22c55e' : 'var(--foreground)';
+              return (
+                <div key={i} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '8px 10px' }}>
+                  <div style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted-foreground)', marginBottom: '4px' }}>{String(p!.factor)}</div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color, wordBreak: 'break-word' }}>{String(p!.value)}</div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
+
+      if (typeof parsed === 'string') {
+        const text = cleanFindingText(parsed);
+
+        // Google-review-style text (confirmed real shape: NWS2A) —
+        // "Name: X\nRating: Y\nNumber of Reviews: Z\n\n\nReviews:\n1. Name: A | Rating: B\n<text>\n\n2. ..."
+        const reviewHeader = text.match(/^Name:\s*(.+?)\nRating:\s*([\d.]+)\nNumber of Reviews:\s*(\d+)/);
+        if (reviewHeader) {
+          const [, bizName, ratingStr, reviewCount] = reviewHeader;
+          const rating = parseFloat(ratingStr);
+          const reviewsBlock = text.split(/Reviews:\s*\n/)[1] ?? '';
+          const reviewEntries = [...reviewsBlock.matchAll(/\d+\.\s*Name:\s*(.+?)\s*\|\s*Rating:\s*([\d.]+)\n([\s\S]*?)(?=\n\s*\d+\.\s*Name:|$)/g)];
+          return (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: reviewEntries.length ? '10px' : 0 }}>
+                <span style={{ fontSize: '22px', fontWeight: 800, color: ACCENT }}>{ratingStr}</span>
+                <div>
+                  <div style={{ color: '#f59e0b', fontSize: '13px', letterSpacing: '1px' }}>
+                    {'★'.repeat(Math.round(rating))}{'☆'.repeat(Math.max(0, 5 - Math.round(rating)))}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>{bizName.trim()} · {reviewCount} reviews</div>
+                </div>
+              </div>
+              {reviewEntries.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {reviewEntries.slice(0, 3).map((m, i) => {
+                    const reviewText = m[3].trim();
+                    return (
+                      <div key={i} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '6px', padding: '8px 10px', fontSize: '11px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--foreground)' }}>{m[1].trim()}</span>
+                          <span style={{ color: '#f59e0b' }}>{'★'.repeat(Math.max(0, Math.min(5, Math.round(parseFloat(m[2])))))}</span>
+                        </div>
+                        <div style={{ color: 'var(--muted-foreground)', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                          {reviewText.length > 220 ? `${reviewText.slice(0, 220)}…` : reviewText}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // Multi-year trend text (confirmed real shape: FIN1A/FIN2A) —
+        // "[2026-12-31]: 125M\n[2024-03-31]: 127M\n..." — mini chart.
+        const trendMatches = [...text.matchAll(/\[(\d{4}-\d{2}-\d{2})\]:\s*([\d.,]+[A-Za-z%]*)/g)];
+        if (trendMatches.length >= 2) {
+          const chartPoints = trendMatches
+            .map((m) => ({ date: m[1], raw: m[2], value: parseFloat(m[2].replace(/[^\d.-]/g, '')) }))
+            .filter((p) => !isNaN(p.value))
+            .sort((a, b) => a.date.localeCompare(b.date));
+          if (chartPoints.length >= 2) {
+            return (
+              <div>
+                <ResponsiveContainer width="100%" height={90}>
+                  <LineChart data={chartPoints}>
+                    <XAxis dataKey="date" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} tickFormatter={(d: string) => d.slice(0, 7)} />
+                    <YAxis hide domain={['auto', 'auto']} />
+                    <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '11px' }} formatter={(_v: any, _n: any, p: any) => [p?.payload?.raw, 'Value']} />
+                    <Line dataKey="value" stroke={ACCENT} dot={{ r: 3 }} strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+                <div style={{ fontSize: '10px', color: 'var(--muted-foreground)', marginTop: '4px' }}>
+                  {chartPoints.map((p) => `${p.date.slice(0, 7)}: ${p.raw}`).join('  ·  ')}
+                </div>
+              </div>
+            );
+          }
+        }
+
+        // Numbered-list-of-entries text (confirmed real shape: PEP findings
+        // — "Following PeP findings :\n1. Mr X (role): description\n2. ...")
+        const numberedEntries = text.split(/\n(?=\d+\.\s)/).filter((s) => /^\d+\.\s/.test(s.trim()));
+        if (numberedEntries.length > 1) {
+          const firstIdx = text.search(/\n?\d+\.\s/);
+          const preamble = firstIdx > 0 ? text.slice(0, firstIdx).trim() : '';
+          return (
+            <div>
+              {preamble && <p style={{ fontSize: '11px', color: 'var(--muted-foreground)', marginBottom: '8px' }}>{preamble}</p>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {numberedEntries.map((entry, i) => {
+                  const clean = entry.replace(/^\d+\.\s*/, '').trim();
+                  const nameMatch = clean.match(/^([^(:]+)[:(]/);
+                  const name = nameMatch ? nameMatch[1].trim() : clean.split(':')[0];
+                  const rest = nameMatch ? clean.slice(nameMatch[0].length - 1) : clean.slice(name.length);
+                  return (
+                    <div key={i} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '6px', padding: '8px 10px', fontSize: '11px' }}>
+                      <div style={{ fontWeight: 600, color: 'var(--foreground)', marginBottom: '2px' }}>{name}</div>
+                      <div style={{ color: 'var(--muted-foreground)', whiteSpace: 'pre-line', lineHeight: 1.5 }}>{rest.trim()}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        }
+
+        return <p style={{ fontSize: '11px', color: 'var(--muted-foreground)', whiteSpace: 'pre-line', lineHeight: 1.6 }}>{text}</p>;
+      }
+
+      return <p style={{ fontSize: '11px', color: 'var(--muted-foreground)', whiteSpace: 'pre-line' }}>{JSON.stringify(parsed, null, 2)}</p>;
+    };
+
+    const keyExecutivesText = profile.key_executives as string | undefined;
+    const shareholdersText = profile.shareholders as string | undefined;
+    const locationForRisk = profile.location || profile.address || null;
+    const bvdIdForLocation = intlSearchResult?.identifier ?? null;
+
+    return (
+      <div style={{ maxWidth: '860px' }}>
+        {searchBarEl}
+
+        {/* Entity header */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px 24px', marginBottom: '4px', marginTop: '16px', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: ACCENT }} />
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '8px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--foreground)' }}>{profile.name ?? intlDisplayName}</h2>
+            {overallRating && (
+              <span style={{
+                fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em',
+                color: themeRatingColor(overallRating),
+                background: `${themeRatingColor(overallRating)}1a`,
+                border: `1px solid ${themeRatingColor(overallRating)}55`,
+                padding: '4px 14px', borderRadius: '999px',
+              }}>
+                Overall: {overallRating}
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '8px' }}>
+            {profile.national_identifier && <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--muted-foreground)' }}>ID <span style={{ color: ACCENT }}>{profile.national_identifier}</span></span>}
+            {profile.incorporation_date && <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>INC <span style={{ color: 'var(--foreground)' }}>{fmtDate(String(profile.incorporation_date))}</span></span>}
+            {profile.legal_status && <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>{profile.legal_status}</span>}
+          </div>
+          {profile.address && (
+            <div style={{ fontSize: '11px', color: 'var(--muted-foreground)', display: 'flex', alignItems: 'flex-start', gap: '5px' }}>
+              <Globe size={11} style={{ flexShrink: 0, marginTop: '2px' }} />{profile.address}
+            </div>
+          )}
+          {(profile.revenue || profile.employee || profile.active_status || profile.website) && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              {profile.active_status && (() => {
+                const isActive = /^active$/i.test(String(profile.active_status).trim());
+                return (
+                  <span style={{ fontSize: '10px', fontWeight: 600, padding: '2px 10px', borderRadius: '999px', background: isActive ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)', color: isActive ? '#22c55e' : '#ef4444' }}>{String(profile.active_status)}</span>
+                );
+              })()}
+              {[profile.revenue, profile.employee].filter(Boolean).map((v, i) => (
+                <span key={i} style={{ fontSize: '10px', padding: '3px 10px', borderRadius: '999px', background: 'rgba(255,255,255,0.06)', color: 'var(--muted-foreground)', border: '1px solid rgba(255,255,255,0.08)' }}>{String(v)}</span>
+              ))}
+              {profile.website && (
+                <a href={String(profile.website)} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: ACCENT, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px', marginLeft: 'auto' }}>
+                  Website<ExternalLink size={10} />
+                </a>
+              )}
+            </div>
+          )}
+          {/* Remaining profile fields — everything the API returned that
+              isn't already shown above (name/address/national_identifier/
+              incorporation_date/legal_status/active_status/revenue/
+              employee/website), rendered generically so nothing is lost. */}
+          {profileEntries.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 20px', fontSize: '11px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              {profileEntries.map(([key, value]) => (
+                <div key={key}>
+                  <div style={{ color: 'var(--muted-foreground)', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '2px' }}>{toLabel(key)}</div>
+                  <div style={{ color: 'var(--foreground)', whiteSpace: 'pre-line' }}>{String(value)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Tab switcher — always visible, matches domestic's tab card ── */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', marginTop: '12px' }}>
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
+            {(['generic', 'location360'] as const).map(key => (
+              <button key={key} onClick={() => setIntlActiveTab(key)}
+                style={{ padding: '12px 20px', fontSize: '12px', fontWeight: intlActiveTab === key ? 700 : 400, color: intlActiveTab === key ? 'var(--foreground)' : 'var(--muted-foreground)', background: 'none', border: 'none', borderBottom: intlActiveTab === key ? `2px solid ${ACCENT}` : '2px solid transparent', cursor: 'pointer', marginBottom: '-1px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {intlActiveTab === key && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: ACCENT }} />}
+                {key === 'generic' ? 'Generic Profiling' : 'Location Risk'}
+              </button>
+            ))}
+          </div>
+
+          {/* AI summary — powered by generate_orbis_ai_brief() on
+              coe-ens-application-backend-orbis, mirroring domestic's own
+              AI brief block below (same BriefOutput renderer, same
+              RISK TIER / KEY RISK FLAGS / etc. section format). */}
+          {intlActiveTab === 'generic' && (
+            <div style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '7px', background: ACCENT, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: '11px', fontWeight: 800, color: '#111' }}>AI</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)' }}>AI Risk Intelligence Brief</div>
+                    <div style={{ fontSize: '10px', color: 'var(--muted-foreground)' }}>Synthesised from profile + theme ratings + findings </div>
+                  </div>
+                </div>
+                <button onClick={generateIntlBrief} disabled={intlBriefLoading || !intlEnsId}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '7px', background: intlBriefLoading ? 'rgba(255,230,0,0.4)' : ACCENT, color: '#111', border: 'none', cursor: intlBriefLoading ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                  {intlBriefLoading
+                    ? <><Loader2 size={12} className="animate-spin" />Generating…</>
+                    : <><RefreshCw size={12} />{intlBriefText ? 'Regenerate' : 'Generate Brief'}</>}
+                </button>
+              </div>
+              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#60a5fa', background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.15)', borderRadius: '5px', padding: '6px 10px', marginBottom: '12px' }}>
+                Click &apos;Generate Brief&apos; to synthesise a structured risk assessment
+                
+              </div>
+              {!intlBriefText && !intlBriefLoading && (
+                <div style={{ fontSize: '12px', color: 'var(--muted-foreground)', fontFamily: 'monospace' }}> Click to generate a summary of the findings. The Ai brief is generated on demand may take a few seconds to generate.</div>
+              )}
+              {intlBriefLoading && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--muted-foreground)', fontSize: '12px' }}>
+                  <Loader2 size={14} className="animate-spin" />Generating…
+                </div>
+              )}
+              {intlBriefText && <BriefOutput text={intlBriefText} />}
+            </div>
+          )}
+
+          {/* Location Risk tab — Location360Client is fully generic (just a
+              location string + entity id), reused as-is. */}
+          {intlActiveTab === 'location360' && (
+            <div style={{ padding: '12px 16px' }}>
+              <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>Location360</div>
+                <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>Default: registered address · add more locations</div>
+              </div>
+              <Location360Client
+                initialLocation={locationForRisk}
+                initialLocations={intlSavedLocations}
+                entityId={bvdIdForLocation}
+                title="Location Risk"
+                onLocationsChange={(locs) => {
+                  setIntlSavedLocations(locs);
+                  if (bvdIdForLocation) {
+                    try { localStorage.setItem(`location360.saved.intl.${bvdIdForLocation}`, JSON.stringify(locs)); } catch { /* ignore */ }
+                  }
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* ══ Generic Profiling sections — everything stacked in one tab,
+            mirroring domestic's own structure ══ */}
+        {intlActiveTab === 'generic' && (
+          <>
+            {/* SECTION 01: RISK OVERVIEW — a Risk Areas / Risk Rating table,
+                same shape as the report doc's "Executive Summary" table
+                (label left, solid-colored rating cell right), not the
+                report-doc's Probe42-only "Financial Score" gauge/radar card
+                domestic shows next to it — Orbis has no equivalent score to
+                plot there, so this is one full-width card. Every active
+                theme rating renders as a row, not a fixed subset. */}
+            <SectionHeader n="01" title="RISK OVERVIEW" />
+            <Card title="Key Risk Flags" icon={Shield} accent="rgba(239,68,68,0.4)">
+              {ratingEntries.length === 0 ? (
+                <p style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>No ratings available.</p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted-foreground)', padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)' }}>Risk Area</th>
+                      <th style={{ textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted-foreground)', padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)', width: '140px' }}>Risk Rating</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ratingEntries.map(([key, rating]) => {
+                      const color = themeRatingColor(rating as string);
+                      // Solid fill reads clearly against a light "No
+                      // Alerts" gray or a saturated red/green, but yellow
+                      // needs dark text to stay legible — same rule the
+                      // report doc's table uses.
+                      const textColor = color === '#eab308' ? '#111' : '#fff';
+                      return (
+                        <tr key={key}>
+                          <td style={{ fontSize: '12px', color: 'var(--foreground)', padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{toLabel(key)}</td>
+                          <td style={{ padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                            <div style={{ background: color, color: textColor, textAlign: 'center', fontSize: '11px', fontWeight: 700, borderRadius: '6px', padding: '5px 8px' }}>{String(rating)}</div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </Card>
+
+            {/* SECTION 02: FINANCIAL PERFORMANCE — one combined multi-line
+                chart per category (was one small single-line chart per
+                metric, which meant Operating Revenue, EBITDA, Cash Flow,
+                PL Before/After Tax each got their own 2-column card even
+                though they share the same date axis and are directly
+                comparable). Metrics with zero data points are filtered out
+                upstream (financialsByCategory), so every category here has
+                something real to plot — categories/metrics are still fully
+                schema-driven, nothing hardcoded to Toyota or any entity. */}
+            {financialCategories.length > 0 && (
+              <>
+                <SectionHeader n="02" title="FINANCIAL PERFORMANCE" />
+                {financialCategories.map((cat) => {
+                  const catIcon = /ratio/i.test(cat) ? BarChart3 : /balance/i.test(cat) ? Landmark : Banknote;
+                  const isRatioCategory = /ratio/i.test(cat);
+                  const LINE_COLORS = [ACCENT, '#60a5fa', '#f472b6', '#34d399', '#f97316', '#a78bfa', '#22d3ee'];
+                  const metrics = financialsByCategory[cat].map((metric) => ({
+                    ...metric,
+                    title: metric.title ?? toLabel(metric.key),
+                    series: [...(metric.data ?? [])]
+                      .sort((a: any, b: any) => (a.closing_date ?? '').localeCompare(b.closing_date ?? ''))
+                      .map((d: any) => ({ date: (d.closing_date ?? '').slice(0, 10), value: d.raw_value, display: d.display_value })),
+                  }));
+                  const metricByTitle = Object.fromEntries(metrics.map((m) => [m.title, m]));
+
+                  // Merge every metric's series onto one shared date axis.
+                  const allDates = Array.from(new Set(metrics.flatMap((m) => m.series.map((p: any) => p.date)))).sort();
+                  const chartData = allDates.map((date) => {
+                    const row: Record<string, any> = { date };
+                    metrics.forEach((m) => {
+                      const point = m.series.find((p: any) => p.date === date);
+                      if (point) {
+                        row[m.key] = point.value;
+                        row[`${m.key}__display`] = point.display;
+                      }
+                    });
+                    return row;
+                  });
+                  const maxPoints = Math.max(0, ...metrics.map((m) => m.series.length));
+
+                  // A single linear axis squashes small series flat next to
+                  // a much bigger one (e.g. Operating Revenue vs. EBITDA) —
+                  // split onto two axes when the latest values are more
+                  // than ~4x apart, grouped around their geometric mean.
+                  const latestAbs: Record<string, number> = Object.fromEntries(
+                    metrics.map((m): [string, number] => [m.key, Math.abs(m.series[m.series.length - 1]?.value ?? 0)]),
+                  );
+                  const nonZero = Object.values(latestAbs).filter((v) => v > 0);
+                  const spread = nonZero.length > 1 ? Math.max(...nonZero) / Math.min(...nonZero) : 1;
+                  const useDualAxis = metrics.length > 1 && spread > 4;
+                  const splitThreshold = useDualAxis ? Math.sqrt(Math.max(...nonZero) * Math.min(...nonZero)) : 0;
+                  const axisForMetric = (key: string) => (useDualAxis && latestAbs[key] < splitThreshold ? 'right' : 'left');
+                  const axisFormatter = (v: number) => (isRatioCategory ? `${v.toFixed(1)}%` : fmtCompactUSD(v));
+
+                  return (
+                    <div key={cat} style={{ marginBottom: '16px' }}>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>{cat}</div>
+                      <Card icon={catIcon} accent="rgba(255,230,0,0.4)">
+                        {/* Latest-value chips — keeps the at-a-glance big
+                            number for each metric even though the chart
+                            below is now shared. */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px', marginBottom: '14px' }}>
+                          {metrics.map((m, i) => {
+                            const latest = m.series[m.series.length - 1];
+                            const color = LINE_COLORS[i % LINE_COLORS.length];
+                            return (
+                              <div key={m.key}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+                                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color, flexShrink: 0 }} />
+                                  <span style={{ fontSize: '9px', color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{m.title}</span>
+                                </div>
+                                <div style={{ fontSize: '16px', fontWeight: 800, color }}>{latest?.display ?? '—'}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {maxPoints > 1 ? (
+                          <ResponsiveContainer width="100%" height={220}>
+                            <LineChart data={chartData} margin={{ top: 4, right: useDualAxis ? 4 : 12, left: 0, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                              <XAxis dataKey="date" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} />
+                              <YAxis yAxisId="left" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} tickFormatter={axisFormatter} width={52} />
+                              {useDualAxis && (
+                                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} tickFormatter={axisFormatter} width={52} />
+                              )}
+                              <Tooltip
+                                contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '11px' }}
+                                formatter={(value: any, name: any, p: any) => {
+                                  const m = metricByTitle[name as string];
+                                  return [m ? p?.payload?.[`${m.key}__display`] ?? value : value, name];
+                                }}
+                              />
+                              {metrics.length > 1 && <Legend wrapperStyle={{ fontSize: '10px' }} />}
+                              {metrics.map((m, i) => (
+                                <Line
+                                  key={m.key}
+                                  yAxisId={axisForMetric(m.key)}
+                                  dataKey={m.key}
+                                  name={m.title}
+                                  stroke={LINE_COLORS[i % LINE_COLORS.length]}
+                                  dot={{ r: 2 }}
+                                  strokeWidth={2}
+                                  connectNulls
+                                />
+                              ))}
+                            </LineChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <p style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>Not enough historical data points for a trend chart.</p>
+                        )}
+                      </Card>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            {/* SECTION 04: BOARD, SHAREHOLDERS & OWNERSHIP */}
+            {(keyExecutivesText || shareholdersText) && (
+              <>
+                <SectionHeader n="03" title="BOARD, SHAREHOLDERS & OWNERSHIP" />
+                {keyExecutivesText && (() => {
+                  // key_executives arrives as one text blob, not a structured
+                  // list — try splitting on blank lines into individual
+                  // entries (matches real observed format: "Name (Role)\n\n
+                  // Next entry..."); falls back to one plain-text card if it
+                  // doesn't look like a list.
+                  const AVATAR_COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#14b8a6'];
+                  const entries = keyExecutivesText.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
+                  // Trailing "& 141 more key executives" / "& 5 previous key
+                  // executives" summary lines aren't a real person — giving
+                  // them a fake avatar with "&1" initials reads as broken,
+                  // so render those as a plain note spanning both columns.
+                  const MORE_NOTE = /^&\s*\d+\s+(more|previous|additional)/i;
+                  if (entries.length > 1) {
+                    return (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: shareholdersText ? '12px' : 0, maxHeight: '420px', overflowY: 'auto', paddingRight: '2px' }}>
+                        {entries.map((entry, i) => {
+                          if (MORE_NOTE.test(entry)) {
+                            return (
+                              <div key={i} style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '10px', fontSize: '11px', color: 'var(--muted-foreground)', fontStyle: 'italic' }}>
+                                {entry.trim()}
+                              </div>
+                            );
+                          }
+                          const nameMatch = entry.match(/^([^(\n]+)\(?([^)]*)\)?/);
+                          const name = (nameMatch?.[1] ?? entry.split('\n')[0]).trim();
+                          const role = nameMatch?.[2]?.trim();
+                          const initials = name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+                          const color = AVATAR_COLORS[i % AVATAR_COLORS.length];
+                          return (
+                            <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '10px', padding: '14px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: `${color}33`, color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 700, flexShrink: 0 }}>{initials || '—'}</div>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                                {role && <div style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>{role}</div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+                  return (
+                    <Card title="Key Executives" icon={Users} accent="rgba(255,230,0,0.4)">
+                      <p style={{ fontSize: '12px', color: 'var(--foreground)', whiteSpace: 'pre-line', lineHeight: 1.6, maxHeight: '300px', overflowY: 'auto', margin: 0 }}>{keyExecutivesText}</p>
+                    </Card>
+                  );
+                })()}
+                {shareholdersText && (
+                  <Card title="Shareholders" icon={Landmark} accent="rgba(255,230,0,0.4)">
+                    <p style={{ fontSize: '12px', color: 'var(--foreground)', whiteSpace: 'pre-line', lineHeight: 1.6, maxHeight: '300px', overflowY: 'auto', margin: 0 }}>{shareholdersText}</p>
+                  </Card>
+                )}
+              </>
+            )}
+
+            {/* SECTIONS 05+: one per findings theme key the API returned, in
+                the order it returned them — not a hardcoded local list */}
+            {findingsThemeKeys.map((key, idx) => {
+              const label = toLabel(key);
+              const rating = ratings?.[key];
+              const rawItems: any[] = findings?.[key] ?? [];
+              // The "financials" theme's FIN-coded items (FIN1A/FIN2A, etc.)
+              // are a coarser, pre-rounded text summary of the exact same
+              // external_supplier_data columns Section 02's combined chart
+              // already plots (verified against real data: e.g. FIN1A's
+              // "125M" vs the chart's $125.45M — same row, same year). Once
+              // Section 02 has that category, showing it again here as
+              // single-line mini-charts is pure duplication — drop just the
+              // FIN-coded items, keeping anything else this theme carries
+              // (e.g. BKR bankruptcy findings share the "financials" theme
+              // but aren't covered by Section 02 at all).
+              const isFinancialsTheme = /financial/i.test(key);
+              const dedupeFin = isFinancialsTheme && financialCategories.length > 0;
+              const items = dedupeFin
+                ? rawItems.filter((it) => !String(it?.kpi_area ?? it?.kpi_code ?? '').toUpperCase().startsWith('FIN'))
+                : rawItems;
+              const dedupedAway = dedupeFin && items.length === 0 && rawItems.length > 0;
+              const Icon = themeIcon(key);
+              return (
+                <div key={key}>
+                  <SectionHeader n={String(idx + 4).padStart(2, '0')} title={label.toUpperCase()} />
+                  {/* Location photos live alongside entity-existence findings,
+                      same placement as domestic's Section 08 — sourced from
+                      google_image_name (now included in the findings
+                      response after the graph.py fix), not part of the
+                      per-KPI findings list itself. */}
+                  {key === 'entity_existence' && (intlImagesLoading || intlImages.length > 0) && (
+                    <div style={{ marginBottom: '12px' }}>
+                      <Card title="Entity Location Images" icon={Building2} accent="rgba(255,230,0,0.4)">
+                        {intlImagesLoading ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--muted-foreground)', fontSize: '12px' }}>
+                            <Loader2 size={14} className="animate-spin" />Loading images…
+                          </div>
+                        ) : (
+                          // Fixed-width thumbnail tiles, not columns that
+                          // stretch to fill the card — with only 1-2 images,
+                          // `repeat(N, 1fr)` used to blow each one up to a
+                          // wide, oversized banner instead of a thumbnail.
+                          // A single image is centered in the card; two or
+                          // more lay out left-to-right as normal.
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px', justifyContent: intlImages.length === 1 ? 'center' : 'start' }}>
+                            {intlImages.map((img, i) => (
+                              <img key={i} src={`data:${img.content_type ?? 'image/jpeg'};base64,${img.data}`} alt={img.filename}
+                                style={{ width: '140px', height: '140px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border)' }} />
+                            ))}
+                          </div>
+                        )}
+                      </Card>
+                    </div>
+                  )}
+                  {items.length === 0 ? (
+                    <Card title={label} icon={Icon}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.1)' }}>
+                        <AlertTriangle size={18} style={{ color: 'rgba(255,255,255,0.2)' }} />
+                        <div style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>
+                          {dedupedAway
+                            ? 'Trend detail for this theme is shown in the Financial Performance section above.'
+                            : `No flagged findings${rating ? ` — theme rating: ${rating}` : ''}.`}
+                        </div>
+                      </div>
+                    </Card>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      {items.map((item: any, i: number) => {
+                        const color = themeRatingColor(item.kpi_rating);
+                        return (
+                          <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden', position: 'relative' }}>
+                            {item.kpi_rating && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: color }} />}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+                              <Icon size={13} style={{ color: '#ca8a04', flexShrink: 0 }} />
+                              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--foreground)', flex: 1 }}>{cleanFindingText(String(item.kpi_definition ?? item.kpi_code ?? ''))}</span>
+                              {item.kpi_rating && (
+                                <span style={{ fontSize: '10px', fontWeight: 700, color, background: `${color}1a`, border: `1px solid ${color}55`, padding: '1px 8px', borderRadius: '999px', flexShrink: 0 }}>{item.kpi_rating}</span>
+                              )}
+                            </div>
+                            {/* Findings vary wildly in length — a long news
+                                excerpt or PEP list used to stretch the card
+                                (and the whole grid row) to match; capping
+                                height and scrolling internally keeps every
+                                card in the grid a predictable size. */}
+                            <div style={{ padding: '14px 16px', maxHeight: '300px', overflowY: 'auto' }}>
+                              {renderKpiDetails(item.kpi_details)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {intlEnsId && (
+              <div style={{ marginTop: '16px' }}>
+                <DownloadDropdown
+                  sessionId={intlSessionId ?? ''}
+                  ensId={intlEnsId}
+                  fileName={profile.name ?? intlDisplayName ?? 'report'}
+                  variant="outline"
+                  showLabel={true}
+                  screeningType="international"
+                />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
   // ─── No data yet ─────────────────────────────────────────────────────────────
   if (!reportData && !isLoading && !error) {
     return (
@@ -759,7 +1839,7 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
             Search any company or LLP for a full intelligence dossier — financials, ratios, risk flags, and procurement analytics.
           </p>
         </div>
-        <SearchBar nameQuery={nameQuery} handleNameInput={handleNameInput} sugLoading={sugLoading} suggestions={suggestions} showDrop={showDrop} pickSuggestion={pickSuggestion} inputRef={inputRef} dropRef={dropRef} />
+        <SearchBar nameQuery={nameQuery} handleNameInput={handleNameInput} sugLoading={sugLoading} suggestions={suggestions} showDrop={showDrop} pickSuggestion={pickSuggestion} inputRef={inputRef} dropRef={dropRef} searchMode={searchMode} onSearchModeChange={setSearchMode} />
       </div>
     );
   }
@@ -768,7 +1848,7 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
   if (isLoading || isEnsLoading) {
     return (
       <div style={{ maxWidth: '860px' }}>
-        <SearchBar nameQuery={nameQuery} handleNameInput={handleNameInput} sugLoading={sugLoading} suggestions={suggestions} showDrop={showDrop} pickSuggestion={pickSuggestion} inputRef={inputRef} dropRef={dropRef} />
+        <SearchBar nameQuery={nameQuery} handleNameInput={handleNameInput} sugLoading={sugLoading} suggestions={suggestions} showDrop={showDrop} pickSuggestion={pickSuggestion} inputRef={inputRef} dropRef={dropRef} searchMode={searchMode} onSearchModeChange={setSearchMode} />
         <div style={{ textAlign: 'center', padding: '64px 0' }}>
           <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 12px', display: 'block', color: ACCENT }} />
           <p style={{ fontSize: '13px', color: 'var(--muted-foreground)' }}>Fetching intelligence for <strong style={{ color: 'var(--foreground)' }}>{name}</strong>…</p>
@@ -781,7 +1861,7 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
   if (error) {
     return (
       <div style={{ maxWidth: '860px' }}>
-        <SearchBar nameQuery={nameQuery} handleNameInput={handleNameInput} sugLoading={sugLoading} suggestions={suggestions} showDrop={showDrop} pickSuggestion={pickSuggestion} inputRef={inputRef} dropRef={dropRef} />
+        <SearchBar nameQuery={nameQuery} handleNameInput={handleNameInput} sugLoading={sugLoading} suggestions={suggestions} showDrop={showDrop} pickSuggestion={pickSuggestion} inputRef={inputRef} dropRef={dropRef} searchMode={searchMode} onSearchModeChange={setSearchMode} />
         <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', padding: '14px 18px', color: '#ef4444', fontSize: '13px', marginTop: '16px' }}>{error}</div>
       </div>
     );
@@ -790,7 +1870,7 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
   // ─── Full report ─────────────────────────────────────────────────────────────
   return (
     <div style={{ maxWidth: '860px' }}>
-      <SearchBar nameQuery={nameQuery} handleNameInput={handleNameInput} sugLoading={sugLoading} suggestions={suggestions} showDrop={showDrop} pickSuggestion={pickSuggestion} inputRef={inputRef} dropRef={dropRef} />
+      <SearchBar nameQuery={nameQuery} handleNameInput={handleNameInput} sugLoading={sugLoading} suggestions={suggestions} showDrop={showDrop} pickSuggestion={pickSuggestion} inputRef={inputRef} dropRef={dropRef} searchMode={searchMode} onSearchModeChange={setSearchMode} />
 
       {/* ── Entity header ── */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px 24px', marginBottom: '4px', marginTop: '16px', position: 'relative', overflow: 'hidden' }}>
@@ -1251,17 +2331,20 @@ export default function EntityAnalysisTab({ selectedEntity }: { selectedEntity?:
                         Loading entity images…
                       </div>
                   ) : entityImages.length > 0 ? (
-                      <div style={{ display: 'grid', gridTemplateColumns: entityImages.length > 1 ? 'repeat(auto-fit, minmax(250px, 1fr))' : '1fr', gap: '12px' }}>
+                      // Fixed-width thumbnail tiles regardless of count —
+                      // a single image is centered in the card; two or
+                      // more lay out left-to-right as normal.
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px', justifyContent: entityImages.length === 1 ? 'center' : 'start' }}>
                         {entityImages.map((img, idx) => (
                           <div key={idx}>
                             <img
                                 src={`data:image/jpeg;base64,${img.data}`}
                                 alt={img.filename}
                                 style={{
-                                  width: '100%',
+                                  width: '140px',
+                                  height: '140px',
                                   borderRadius: '8px',
                                   display: 'block',
-                                  maxHeight: '280px',
                                   objectFit: 'cover',
                                   marginBottom: '6px'
                                 }}

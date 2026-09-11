@@ -3,20 +3,16 @@ import { cookies } from 'next/headers';
 
 /**
  * GET /api/moodys-name-search?orgName=...
- *
- * Proxies to Moody's orchestration:
- *   GET NEXT_PUBLIC_MOODYS_ORCHESTRATION/moodys/nameSearch?orgName=...
- *
- * Mirror of /api/probe42-name-search but pointed at the Moody's
- * orchestration. The entity-validation step calls this when
- * screeningType === 'international'.
+ * Proxies → international ORCH /moodys/nameSearch?orgName=...
+ * Mirrors /api/probe42-name-search/route.ts exactly, pointed at the
+ * Moody's/Orbis orchestration base and auth cookie instead.
  */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const orgName = searchParams.get('orgName') ?? '';
 
-    if (orgName.trim().length < 3) {
+    if (orgName.length < 3) {
       return NextResponse.json({ results: [] }, { status: 200 });
     }
 
@@ -25,15 +21,8 @@ export async function GET(req: NextRequest) {
       cookieStore.get('moodys_access_token')?.value ??
       req.headers.get('authorization')?.replace('Bearer ', '');
 
-    const moodysOrchBase = process.env.SERVER_MOODYS_ORCHESTRATION || process.env.NEXT_PUBLIC_MOODYS_ORCHESTRATION;
-    if (!moodysOrchBase) {
-      return NextResponse.json(
-        { error: 'SERVER_MOODYS_ORCHESTRATION / NEXT_PUBLIC_MOODYS_ORCHESTRATION is not configured' },
-        { status: 500 },
-      );
-    }
-
-    const orchUrl = `${moodysOrchBase}/moodys/nameSearch?orgName=${encodeURIComponent(orgName.trim())}`;
+    const orchestrationBase = process.env.SERVER_MOODYS_ORCHESTRATION || process.env.NEXT_PUBLIC_MOODYS_ORCHESTRATION;
+    const orchUrl = `${orchestrationBase}/moodys/nameSearch?orgName=${encodeURIComponent(orgName)}`;
 
     const orchRes = await fetch(orchUrl, {
       method: 'GET',
@@ -44,26 +33,19 @@ export async function GET(req: NextRequest) {
 
     const contentType = orchRes.headers.get('content-type') ?? '';
     if (!contentType.includes('application/json')) {
-      return NextResponse.json(
-        { error: `Orchestration returned status ${orchRes.status}` },
-        { status: 502 },
-      );
+      return NextResponse.json({ error: `Orch returned ${orchRes.status}` }, { status: 502 });
     }
 
     const data = await orchRes.json();
-
     if (!orchRes.ok) {
       return NextResponse.json(
-        { error: data?.detail?.message ?? data?.message ?? "Moody's name search failed" },
+        { error: data?.detail?.message ?? 'Name search failed' },
         { status: orchRes.status },
       );
     }
 
     return NextResponse.json(data, { status: 200 });
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? 'Internal server error' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: err?.message ?? 'Internal server error' }, { status: 500 });
   }
 }
