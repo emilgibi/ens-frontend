@@ -11,9 +11,12 @@ import { cookies } from 'next/headers';
  * GET /supplier/get-session-screening-status, which has no non-session
  * filter and returns all of them), then fetches that session's entities
  * (via GET /supplier/get-main-supplier-data-compiled) for each one, and
- * merges the results — deduplicating by ens_id and keeping the most
- * recently updated occurrence, since the same company can be re-screened
- * across multiple sessions.
+ * merges the results — deduplicating by bvd_id (a fresh ens_id is minted
+ * on every screening, even for a company already screened before, so
+ * ens_id itself is not a stable per-company key), preferring a COMPLETED
+ * row over a SKIPPED one and otherwise keeping the most recently updated
+ * occurrence, since the same company can be re-screened across multiple
+ * sessions.
  *
  * This does one HTTP call per session on every request. Fine at realistic
  * session volumes; would need real caching or a proper backend aggregate
@@ -191,6 +194,20 @@ export async function getEntityRatingsBulk(
   return Object.fromEntries(results);
 }
 
+// Status rank used when deduping re-screened entities below: a SKIPPED row
+// (cooldown hit, no analysis actually ran) must never shadow an older
+// COMPLETED row that has real report data, even if it's more recent.
+// Ties (e.g. two COMPLETED rows) fall back to update_time recency.
+const STATUS_RANK: Record<string, number> = {
+  COMPLETED: 2,
+  IN_PROGRESS: 1,
+  SKIPPED: 0,
+};
+
+function statusRank(status: string | undefined): number {
+  return STATUS_RANK[status ?? ''] ?? 1;
+}
+
 export async function getAllInternationalEntities(): Promise<Record<string, any>[]> {
   const auth = await getMoodysAuth();
   if (!auth) return [];
@@ -203,19 +220,29 @@ export async function getAllInternationalEntities(): Promise<Record<string, any>
     sessionIds.map((sessionId) => fetchEntitiesForSession(sessionId, backendBase, token)),
   );
 
-  const byEnsId = new Map<string, Record<string, any>>();
+  // Keyed by bvd_id, not ens_id: the backend mints a brand-new ens_id on
+  // every single screening (even re-screening the exact same company), so
+  // the same real-world company can have many ens_id rows across sessions,
+  // all sharing one bvd_id. bvd_id is the only stable identifier for "this
+  // is the same company" — dedupe on that, falling back to ens_id only for
+  // the rare row where bvd_id hasn't been populated yet.
+  const byKey = new Map<string, Record<string, any>>();
   for (const rows of entityLists) {
     for (const row of rows) {
       const ensId = row['ens_id'];
       if (!ensId) continue;
-      const existing = byEnsId.get(ensId);
+      const bvdId = (row['bvd_id'] ?? '').toString().trim().toUpperCase();
+      const key = bvdId || ensId;
+      const existing = byKey.get(key);
+      const rowRank = statusRank(row['overall_status']);
+      const existingRank = existing ? statusRank(existing['overall_status']) : -1;
       const rowUpdated = new Date(row['update_time'] ?? 0).getTime();
       const existingUpdated = existing ? new Date(existing['update_time'] ?? 0).getTime() : -Infinity;
-      if (!existing || rowUpdated > existingUpdated) {
-        byEnsId.set(ensId, row);
+      if (!existing || rowRank > existingRank || (rowRank === existingRank && rowUpdated > existingUpdated)) {
+        byKey.set(key, row);
       }
     }
   }
 
-  return Array.from(byEnsId.values());
+  return Array.from(byKey.values());
 }
