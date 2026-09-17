@@ -64,5 +64,5 @@ export default async function middleware(req: NextRequest) {
 // ✅ KEY FIX: exclude /api/events from middleware entirely
 // Middleware breaks SSE streaming — must never intercept this route
 export const config = {
-    matcher: ['/((?!_next/static|_next/image|favicon.ico|api/events).*)'],
+    matcher: ['/((?!_next/static|_next/image|favicon.ico|api/).*)'],
 };

@@ -14,6 +14,7 @@ export const status = pgEnum("status", ['QUEUED', 'SKIPPED', 'NOT_STARTED', 'STA
 export const stepStatusEnum = pgEnum("step_status_enum", ['not_called', 'failed', 'passed'])
 export const validationstatus = pgEnum("validationstatus", ['VALIDATED', 'NOT_VALIDATED', 'PENDING'])
 export const screeningtypeenum = pgEnum("screeningtypeenum", ['domestic', 'international'])
+export const watchlistschedulefrequency = pgEnum("watchlistschedulefrequency", ['none', 'daily', 'weekly'])
 
 
 export const alembicVersion = pgTable("alembic_version", {
@@ -622,3 +623,28 @@ export const matchbvdid = pgTable("matchbvdid", {
 	addressType: varchar("address_type", { length: 255 }),
 	ensId: varchar("ens_id", { length: 255 }).primaryKey().notNull(),
 });
+
+export const watchlistItems = pgTable("watchlist_items", {
+	id: serial().primaryKey().notNull(),
+	userId: varchar("user_id"),
+	entityName: varchar("entity_name", { length: 255 }).notNull(),
+	entityIdentifier: varchar("entity_identifier", { length: 255 }),
+	entityIdentifierType: varchar("entity_identifier_type", { length: 50 }),
+	risks: jsonb().notNull().default([]),
+	materials: jsonb().notNull().default([]),
+	finalMat: varchar("final_mat", { length: 255 }),
+	sob: varchar({ length: 50 }),
+	lastRunAt: timestamp("last_run_at", { withTimezone: true, mode: 'string' }),
+	lastAiSummary: text("last_ai_summary"),
+	lastNews: jsonb("last_news").default([]),
+	lastAiErrors: jsonb("last_ai_errors").default([]),
+	scheduleFrequency: watchlistschedulefrequency("schedule_frequency").default('none').notNull(),
+	createTime: timestamp("create_time", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updateTime: timestamp("update_time", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [usersTable.userId],
+			name: "watchlist_items_user_id_fkey"
+		}).onDelete("cascade"),
+]);

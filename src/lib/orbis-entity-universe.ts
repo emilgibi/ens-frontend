@@ -11,12 +11,9 @@ import { cookies } from 'next/headers';
  * GET /supplier/get-session-screening-status, which has no non-session
  * filter and returns all of them), then fetches that session's entities
  * (via GET /supplier/get-main-supplier-data-compiled) for each one, and
- * merges the results — deduplicating by bvd_id (a fresh ens_id is minted
- * on every screening, even for a company already screened before, so
- * ens_id itself is not a stable per-company key), preferring a COMPLETED
- * row over a SKIPPED one and otherwise keeping the most recently updated
- * occurrence, since the same company can be re-screened across multiple
- * sessions.
+ * merges the results — deduplicating by ens_id and keeping the most
+ * recently updated occurrence, since the same company can be re-screened
+ * across multiple sessions.
  *
  * This does one HTTP call per session on every request. Fine at realistic
  * session volumes; would need real caching or a proper backend aggregate
@@ -25,6 +22,25 @@ import { cookies } from 'next/headers';
 
 const MAX_SESSIONS = 1000;
 const MAX_ROWS_PER_SESSION = 1000;
+
+// Every fetch below now goes through this instead of raw fetch(). Without a
+// timeout, a hung (not erroring, just never-responding) Orbis backend makes
+// the underlying await pend forever — since there's no exception, no
+// try/catch anywhere can save it, and the whole page (a Server Component)
+// just spins indefinitely waiting for a response that's never coming. This
+// wraps every request in an AbortController so it fails loudly with a
+// catchable AbortError after FETCH_TIMEOUT_MS instead of hanging forever.
+const FETCH_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function getMoodysAuth(): Promise<{ backendBase: string; token: string } | null> {
   const backendBase = process.env.SERVER_MOODYS_BACKEND || process.env.NEXT_PUBLIC_MOODYS_BACKEND;
@@ -48,7 +64,7 @@ async function fetchAllInternationalSessionIds(
     // No screening_analysis_status filter — "" (default) means all sessions,
     // not just active ones, which is what a universe view needs.
 
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithTimeout(url.toString(), {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return [];
@@ -74,7 +90,7 @@ async function fetchEntitiesForSession(
     url.searchParams.set('page_no', '1');
     url.searchParams.set('rows_per_page', String(MAX_ROWS_PER_SESSION));
 
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithTimeout(url.toString(), {
       headers: { Authorization: `Bearer ${token}` },
     });
     // 404 just means this session has no compiled entities yet (e.g. still
@@ -106,9 +122,9 @@ export type EntityRatings = {
  * compile_company_profile()/pull_ratings() functions that power the
  * eye-icon overview sheet, and the same shape Probe42's equivalent
  * /universe/get-submodal-profile returns. Returns null on any failure
- * (missing data, network error, etc.) rather than throwing, since this
- * is used to enrich list/table rows where one bad entity shouldn't break
- * the whole page.
+ * (missing data, network error, timeout, etc.) rather than throwing, since
+ * this is used to enrich list/table rows where one bad entity shouldn't
+ * break the whole page.
  */
 async function fetchEntityRatings(
   ensId: string,
@@ -116,7 +132,7 @@ async function fetchEntityRatings(
   token: string,
 ): Promise<EntityRatings | null> {
   try {
-    const res = await fetch(`${backendBase}/graph/get-submodal-profile`, {
+    const res = await fetchWithTimeout(`${backendBase}/graph/get-submodal-profile`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -194,20 +210,6 @@ export async function getEntityRatingsBulk(
   return Object.fromEntries(results);
 }
 
-// Status rank used when deduping re-screened entities below: a SKIPPED row
-// (cooldown hit, no analysis actually ran) must never shadow an older
-// COMPLETED row that has real report data, even if it's more recent.
-// Ties (e.g. two COMPLETED rows) fall back to update_time recency.
-const STATUS_RANK: Record<string, number> = {
-  COMPLETED: 2,
-  IN_PROGRESS: 1,
-  SKIPPED: 0,
-};
-
-function statusRank(status: string | undefined): number {
-  return STATUS_RANK[status ?? ''] ?? 1;
-}
-
 export async function getAllInternationalEntities(): Promise<Record<string, any>[]> {
   const auth = await getMoodysAuth();
   if (!auth) return [];
@@ -220,29 +222,19 @@ export async function getAllInternationalEntities(): Promise<Record<string, any>
     sessionIds.map((sessionId) => fetchEntitiesForSession(sessionId, backendBase, token)),
   );
 
-  // Keyed by bvd_id, not ens_id: the backend mints a brand-new ens_id on
-  // every single screening (even re-screening the exact same company), so
-  // the same real-world company can have many ens_id rows across sessions,
-  // all sharing one bvd_id. bvd_id is the only stable identifier for "this
-  // is the same company" — dedupe on that, falling back to ens_id only for
-  // the rare row where bvd_id hasn't been populated yet.
-  const byKey = new Map<string, Record<string, any>>();
+  const byEnsId = new Map<string, Record<string, any>>();
   for (const rows of entityLists) {
     for (const row of rows) {
       const ensId = row['ens_id'];
       if (!ensId) continue;
-      const bvdId = (row['bvd_id'] ?? '').toString().trim().toUpperCase();
-      const key = bvdId || ensId;
-      const existing = byKey.get(key);
-      const rowRank = statusRank(row['overall_status']);
-      const existingRank = existing ? statusRank(existing['overall_status']) : -1;
+      const existing = byEnsId.get(ensId);
       const rowUpdated = new Date(row['update_time'] ?? 0).getTime();
       const existingUpdated = existing ? new Date(existing['update_time'] ?? 0).getTime() : -Infinity;
-      if (!existing || rowRank > existingRank || (rowRank === existingRank && rowUpdated > existingUpdated)) {
-        byKey.set(key, row);
+      if (!existing || rowUpdated > existingUpdated) {
+        byEnsId.set(ensId, row);
       }
     }
   }
 
-  return Array.from(byKey.values());
+  return Array.from(byEnsId.values());
 }

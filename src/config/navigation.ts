@@ -21,6 +21,11 @@ export const navigationItems: NavigationItem[] = [
     icon: SearchCheck,
   },
   {
+    name: 'Risk Configuration',
+    href: '/risk-configuration',
+    icon: ShieldAlert,
+  },
+  {
     name: 'Screening History',
     href: '/screening-history',
     icon: History,
